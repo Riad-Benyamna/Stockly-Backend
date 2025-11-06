@@ -23,9 +23,35 @@ const pool = new Pool({
   ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
 });
 
-pool.query('SELECT NOW()', (err, res) => {
-  if (err) console.error('❌ Database error:', err);
-  else console.log('✅ Database connected');
+pool.query('SELECT NOW()', async (err, res) => {
+  if (err) {
+    console.error('❌ Database error:', err);
+  } else {
+    console.log('✅ Database connected');
+    
+    // Auto-create users table if it doesn't exist
+    try {
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS users (
+          id SERIAL PRIMARY KEY,
+          email VARCHAR(255) UNIQUE NOT NULL,
+          name VARCHAR(255),
+          picture VARCHAR(500),
+          google_id VARCHAR(255) UNIQUE,
+          auth_token VARCHAR(255) UNIQUE NOT NULL,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          last_login TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+      `);
+      
+      await pool.query(`CREATE INDEX IF NOT EXISTS idx_users_token ON users(auth_token);`);
+      await pool.query(`CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);`);
+      
+      console.log('✅ Users table ready');
+    } catch (err) {
+      console.error('❌ Table creation error:', err);
+    }
+  }
 });
 
 // ==========================================
