@@ -16,7 +16,7 @@ const PRICE_KEY = process.env.ALPHA_VANTAGE_KEY;
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
 
 // ==========================================
-// DATABASE CONNECTION (NEW)
+// DATABASE CONNECTION
 // ==========================================
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
@@ -29,7 +29,6 @@ pool.query('SELECT NOW()', async (err, res) => {
   } else {
     console.log('✅ Database connected');
     
-    // Auto-create users table if it doesn't exist
     try {
       await pool.query(`
         CREATE TABLE IF NOT EXISTS users (
@@ -55,47 +54,75 @@ pool.query('SELECT NOW()', async (err, res) => {
 });
 
 // ==========================================
-// GOOGLE OAUTH (NEW)
+// GOOGLE OAUTH
 // ==========================================
 app.post('/auth/google', async (req, res) => {
   const { idToken } = req.body;
-  if (!idToken) return res.status(400).json({ error: 'Missing Google token' });
+  
+  console.log('=== OAuth Request Received ===');
+  console.log('Token received:', idToken ? 'Yes' : 'No');
+  
+  if (!idToken) {
+    console.log('❌ No token provided');
+    return res.status(400).json({ error: 'Missing Google token' });
+  }
   
   try {
-    const response = await fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=\${idToken}`);
+    console.log('Verifying token with Google...');
+    const response = await fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=${idToken}`);
     const googleData = await response.json();
-    if (googleData.error) return res.status(401).json({ error: 'Invalid Google token' });
+    
+    console.log('Google response status:', response.status);
+    console.log('Google response:', JSON.stringify(googleData, null, 2));
+    
+    if (googleData.error || response.status !== 200) {
+      console.error('❌ Google rejected token:', googleData.error_description || googleData.error);
+      return res.status(401).json({ 
+        error: 'Invalid Google token',
+        details: googleData.error_description || 'Token verification failed'
+      });
+    }
     
     const { email, name, picture, sub: googleId } = googleData;
-    let user = await pool.query('SELECT * FROM users WHERE email = \$1', [email]);
+    
+    console.log('✅ Token valid for:', email);
+    
+    let user = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
     
     if (user.rows.length === 0) {
       const authToken = crypto.randomBytes(32).toString('hex');
       user = await pool.query(
-        'INSERT INTO users (email, name, picture, google_id, auth_token) VALUES (\$1, \$2, \$3, \$4, \$5) RETURNING *',
+        'INSERT INTO users (email, name, picture, google_id, auth_token) VALUES ($1, $2, $3, $4, $5) RETURNING *',
         [email, name, picture, googleId, authToken]
       );
-      console.log('✅ New user:', email);
+      console.log('✅ New user created:', email);
     } else {
-      await pool.query('UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE id = \$1', [user.rows[0].id]);
+      await pool.query('UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE id = $1', [user.rows[0].id]);
       console.log('✅ User logged in:', email);
     }
     
     const userData = user.rows[0];
     res.json({
       success: true,
-      user: { id: userData.id, email: userData.email, name: userData.name, picture: userData.picture, token: userData.auth_token }
+      user: { 
+        id: userData.id, 
+        email: userData.email, 
+        name: userData.name, 
+        picture: userData.picture, 
+        token: userData.auth_token 
+      }
     });
+    
   } catch (err) {
-    console.error('OAuth error:', err);
-    res.status(500).json({ error: 'Authentication failed' });
+    console.error('❌ OAuth error:', err);
+    res.status(500).json({ error: 'Authentication failed', details: err.message });
   }
 });
 
 app.post('/auth/verify', async (req, res) => {
   const { token } = req.body;
   try {
-    const result = await pool.query('SELECT id, email, name, picture FROM users WHERE auth_token = \$1', [token]);
+    const result = await pool.query('SELECT id, email, name, picture FROM users WHERE auth_token = $1', [token]);
     if (result.rows.length === 0) return res.status(401).json({ error: 'Invalid token' });
     res.json({ valid: true, user: result.rows[0] });
   } catch (err) {
@@ -105,14 +132,14 @@ app.post('/auth/verify', async (req, res) => {
 });
 
 // ==========================================
-// AUTH MIDDLEWARE (NEW)
+// AUTH MIDDLEWARE
 // ==========================================
 async function authenticateUser(req, res, next) {
   const { token } = req.body;
   if (!token) return res.status(401).json({ error: 'Authentication required' });
   
   try {
-    const result = await pool.query('SELECT * FROM users WHERE auth_token = \$1', [token]);
+    const result = await pool.query('SELECT * FROM users WHERE auth_token = $1', [token]);
     if (result.rows.length === 0) return res.status(401).json({ error: 'Invalid token' });
     req.user = result.rows[0];
     next();
@@ -134,20 +161,15 @@ const calculateTechnicalSignals = (priceData, changePct) => {
   return signals;
 };
 
-// Utility: Analyze news sentiment (improved)
+// Utility: Analyze news sentiment
 const analyzeNewsSentiment = (news, ticker) => {
   if (!news.length) return { score: 50, label: 'Neutral', color: '#6b7280' };
   
-  // Positive keywords (weighted)
   const strongPositive = ['surge', 'soar', 'jump', 'rally', 'beat', 'exceed', 'upgrade', 'breakthrough', 'record', 'best'];
   const moderatePositive = ['growth', 'gain', 'rise', 'up', 'profit', 'strong', 'increase', 'positive', 'success', 'improve'];
   
-  // Negative keywords (weighted)
   const strongNegative = ['plunge', 'crash', 'collapse', 'miss', 'downgrade', 'loss', 'worst', 'fail', 'cut'];
   const moderateNegative = ['fall', 'drop', 'decline', 'down', 'weak', 'concern', 'risk', 'struggle', 'pressure'];
-  
-  // Neutral keywords that might appear in financial news
-  const neutralWords = ['hold', 'maintain', 'steady', 'flat', 'unchanged', 'analyst', 'report'];
   
   let sentimentScore = 0;
   let relevanceScore = 0;
@@ -155,26 +177,21 @@ const analyzeNewsSentiment = (news, ticker) => {
   news.forEach(article => {
     const text = (article.title + ' ' + (article.description || '')).toLowerCase();
     
-    // Check if article actually mentions the ticker/company
     if (text.includes(ticker.toLowerCase())) {
-      relevanceScore += 20; // Boost for direct mention
+      relevanceScore += 20;
       
-      // Strong signals
       strongPositive.forEach(word => { if (text.includes(word)) sentimentScore += 15; });
       strongNegative.forEach(word => { if (text.includes(word)) sentimentScore -= 15; });
       
-      // Moderate signals
       moderatePositive.forEach(word => { if (text.includes(word)) sentimentScore += 5; });
       moderateNegative.forEach(word => { if (text.includes(word)) sentimentScore -= 5; });
     } else {
-      relevanceScore -= 10; // Penalize indirect/competitor news
+      relevanceScore -= 10;
     }
   });
   
-  // Normalize score (0-100 scale)
   const score = Math.max(0, Math.min(100, 50 + sentimentScore + (relevanceScore / news.length)));
   
-  // Determine label
   let label = 'Neutral', color = '#6b7280';
   
   if (score >= 70) { label = 'Positive'; color = '#10b981'; }
@@ -189,11 +206,10 @@ const analyzeNewsSentiment = (news, ticker) => {
 };
 
 // ==========================================
-// CRYPTO-SPECIFIC ANALYSIS HANDLER
+// CRYPTO HANDLER
 // ==========================================
 async function handleCryptoAnalysis(ticker, res) {
   try {
-    // Get crypto data from CoinGecko (free API, no key needed)
     const cryptoIds = {
       'BTC': 'bitcoin', 'ETH': 'ethereum', 'DOGE': 'dogecoin', 
       'SOL': 'solana', 'ADA': 'cardano', 'XRP': 'ripple',
@@ -205,7 +221,6 @@ async function handleCryptoAnalysis(ticker, res) {
     
     const coinId = cryptoIds[ticker.toUpperCase()] || ticker.toLowerCase();
     
-    // Fetch crypto data
     let price = null, change24h = null, changePct = null, volume = null, marketCap = null, high24h = null, low24h = null;
     
     try {
@@ -217,7 +232,7 @@ async function handleCryptoAnalysis(ticker, res) {
         changePct = data.market_data.price_change_percentage_24h.toFixed(2);
         change24h = data.market_data.price_change_24h.toFixed(2);
         volume = data.market_data.total_volume.usd.toLocaleString('en-US', { maximumFractionDigits: 0 });
-        marketCap = (data.market_data.market_cap.usd / 1e9).toFixed(2); // In billions
+        marketCap = (data.market_data.market_cap.usd / 1e9).toFixed(2);
         high24h = data.market_data.high_24h.usd.toFixed(2);
         low24h = data.market_data.low_24h.usd.toFixed(2);
       }
@@ -225,7 +240,6 @@ async function handleCryptoAnalysis(ticker, res) {
       console.error("CoinGecko fetch error:", e.message);
     }
 
-    // Get crypto news (same NewsAPI but crypto-focused)
     let news = [];
     if (NEWS_KEY) {
       try {
@@ -249,11 +263,9 @@ async function handleCryptoAnalysis(ticker, res) {
       }
     }
 
-    // Calculate crypto-specific sentiment
     const pct = changePct ? parseFloat(changePct) : 0;
     let score = 50;
     
-    // Crypto is more volatile, adjust scoring
     if (pct > 20) score += 25;
     else if (pct > 10) score += 20;
     else if (pct > 5) score += 15;
@@ -279,36 +291,33 @@ async function handleCryptoAnalysis(ticker, res) {
     else if (score >= 25) { interestLevel = "Below Average Interest"; interestColor = "#f59e0b"; }
     else { interestLevel = "Low Market Interest"; interestColor = "#ef4444"; }
 
-    // Crypto-specific AI prompt
     const prompt = `You're a cryptocurrency market analyst providing educational context for ${ticker}.
 
 CURRENT DATA:
-• Price: $${price} (${changePct}% in 24h)
-• 24h Range: $${low24h} - $${high24h}
-• Market Cap: $${marketCap}B
-• 24h Volume: $${volume}
+- Price: $${price} (${changePct}% in 24h)
+- 24h Range: $${low24h} - $${high24h}
+- Market Cap: $${marketCap}B
+- 24h Volume: $${volume}
 ${news.length ? `\nRECENT CRYPTO NEWS:\n${news.map(n => `• ${n.source} (${n.time}h ago): ${n.title}`).join('\n')}` : '\n• Limited crypto news coverage in past 72 hours'}
 
 Write a focused 4-section analysis (90 words). Use numbered format:
 
 1. MARKET CONTEXT
-Explain the 24h price movement for ${ticker}. What's driving this crypto specifically? Reference on-chain activity, institutional adoption, or network updates if relevant.
+Explain the 24h price movement for ${ticker}. What's driving this crypto specifically?
 
 2. KEY WATCHPOINTS
-List 2-3 crypto-specific factors traders monitor for ${ticker} (network activity, whale movements, upgrades, adoption metrics). Use bullets (•).
+List 2-3 crypto-specific factors traders monitor for ${ticker}. Use bullets (•).
 
 3. RISK CONSIDERATIONS  
-Identify 1-2 risks specific to this cryptocurrency (regulation, competition, technical risks). Use bullets (•).
+Identify 1-2 risks specific to this cryptocurrency. Use bullets (•).
 
 4. RESEARCH CHECKLIST
 One sentence: what should crypto traders verify about ${ticker} before taking a position?
 
 RULES:
-- Be SPECIFIC to ${ticker} and crypto markets
-- Mention blockchain/network specifics if relevant
-- NO stock market terminology (no "earnings", "SEC filings", "EPS")
-- Use crypto language: on-chain, DeFi, staking, network, protocol
-- Third-person only ("traders typically" not "you should")
+- Be SPECIFIC to ${ticker}
+- NO stock market terminology
+- Third-person only
 - Plain text, NO markdown
 - Start each section with number`;
 
@@ -329,7 +338,6 @@ RULES:
     const aiData = await aiResponse.json();
     let aiAnalysis = aiData.choices?.[0]?.message?.content || "Analysis temporarily unavailable.";
 
-    // Parse sections
     const sectionRegex = /(\d+\.\s+[A-Z\s]+)\n([\s\S]*?)(?=\d+\.\s+[A-Z\s]+|$)/g;
     const sections = [];
     let match;
@@ -359,7 +367,6 @@ RULES:
       'RESEARCH CHECKLIST': { bg: 'rgba(16,185,129,0.06)', border: '#10b981', icon: '✓' }
     };
 
-    // Build UI
     const headerBadge = `
       <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 12px;background:rgba(15,15,15,0.95);border-bottom:1px solid rgba(249,115,22,0.2);font-size:10px;">
         <span style="color:#888;">🪙 Crypto Analysis Tool</span>
@@ -506,23 +513,17 @@ RULES:
 }
 
 app.post("/analyze", authenticateUser, async (req, res) => {
-  const { ticker, isCrypto } = req.body; // Frontend will tell us if it's crypto
+  const { ticker, isCrypto } = req.body;
   if (!ticker) return res.status(400).json({ error: "Missing ticker" });
 
   try {
-    // === DETECT IF CRYPTO ===
-    // If frontend explicitly tells us it's crypto, trust it
-    // Otherwise, check common crypto tickers
     const knownCryptoTickers = ['BTC', 'ETH', 'DOGE', 'SOL', 'ADA', 'XRP', 'DOT', 'MATIC', 'AVAX', 'LINK', 'UNI', 'LTC', 'BCH', 'SHIB', 'ATOM', 'XLM', 'ALGO', 'VET', 'PEPE', 'ARB', 'OP', 'RNDR', 'AAVE', 'MKR', 'SNX'];
     const detectAsCrypto = isCrypto || knownCryptoTickers.includes(ticker.toUpperCase());
     
     if (detectAsCrypto) {
-      // Redirect to crypto-specific handler
       return await handleCryptoAnalysis(ticker, res);
     }
     
-    // === STOCK ANALYSIS (existing code continues below) ===
-    // === DATA COLLECTION ===
     let price = null, change = null, changePct = null, volume = null, high = null, low = null;
     
     if (PRICE_KEY) {
@@ -545,44 +546,36 @@ app.post("/analyze", authenticateUser, async (req, res) => {
     let news = [];
     if (NEWS_KEY) {
       try {
-        const since = new Date(Date.now() - 3*24*60*60*1000).toISOString(); // Extended to 3 days for better coverage
+        const since = new Date(Date.now() - 3*24*60*60*1000).toISOString();
         
-        // First, get company name from a ticker-to-name map (for better search)
         const tickerToName = {
           'AAPL': 'Apple', 'TSLA': 'Tesla', 'MSFT': 'Microsoft', 'GOOGL': 'Google Alphabet',
           'AMZN': 'Amazon', 'AMD': 'AMD Advanced Micro Devices', 'NVDA': 'NVIDIA', 
           'META': 'Meta Facebook', 'NFLX': 'Netflix', 'INTC': 'Intel'
-          // Add more as needed
         };
         const companyName = tickerToName[ticker] || ticker;
         
-        // Financial-focused sources
         const financialDomains = 'bloomberg.com,reuters.com,cnbc.com,marketwatch.com,seekingalpha.com,fool.com,investopedia.com,barrons.com,wsj.com,ft.com,yahoo.com,benzinga.com,thestreet.com';
         
-        // Search with both ticker AND company name
         let r = await fetch(`https://newsapi.org/v2/everything?q="${ticker}" OR "${companyName}"&domains=${financialDomains}&language=en&from=${since}&sortBy=publishedAt&pageSize=15&apiKey=${NEWS_KEY}`);
         let d = await r.json();
         
-        // If no results from financial sources, try broader but still filtered
         if (!d.articles?.length) {
           r = await fetch(`https://newsapi.org/v2/everything?q="${ticker}" AND (stock OR shares OR earnings OR trading)&language=en&from=${since}&sortBy=publishedAt&pageSize=15&apiKey=${NEWS_KEY}`);
           d = await r.json();
         }
         
         if (d.articles?.length) {
-          // STRICT filtering: Title must contain ticker OR company name + stock keywords
           const relevantArticles = d.articles.filter(a => {
             const title = a.title.toLowerCase();
             const description = (a.description || '').toLowerCase();
             const fullText = title + ' ' + description;
             
-            // Must mention the actual company/ticker
             const mentionsCompany = title.includes(ticker.toLowerCase()) || 
                                    companyName.toLowerCase().split(' ').some(word => 
                                      word.length > 3 && title.includes(word.toLowerCase())
                                    );
             
-            // Must have stock-related keywords
             const stockKeywords = ['stock', 'shares', 'trading', 'investor', 'market', 'price', 'earnings', 'revenue', 'quarter', 'analyst', 'upgrade', 'downgrade', 'wall street', 'profit', 'loss'];
             const hasStockKeywords = stockKeywords.some(keyword => fullText.includes(keyword));
             
@@ -601,12 +594,10 @@ app.post("/analyze", authenticateUser, async (req, res) => {
       }
     }
 
-    // === ANALYSIS ===
     const pct = changePct ? parseFloat(changePct) : 0;
     const technicals = calculateTechnicalSignals({ price, high, low }, pct);
     const sentiment = analyzeNewsSentiment(news, ticker);
     
-    // Market Interest Score (mechanical calculation)
     let score = 50;
     if (pct > 10) score += 20;
     else if (pct > 5) score += 15;
@@ -624,22 +615,21 @@ app.post("/analyze", authenticateUser, async (req, res) => {
     score += (sentiment.score - 50) / 5;
     score = Math.max(0, Math.min(100, Math.round(score)));
 
-    // === AI ANALYSIS (Educational Context) ===
     const prompt = `You're a financial analyst providing educational market context for ${ticker} stock.
 
 CURRENT MARKET DATA:
-• Price: $${price} (${changePct}% ${change >= 0 ? 'up' : 'down'} today)
-• Day Range: $${low} - $${high}  
-• Volume: ${volume}
+- Price: $${price} (${changePct}% ${change >= 0 ? 'up' : 'down'} today)
+- Day Range: $${low} - $${high}  
+- Volume: ${volume}
 ${news.length ? `\nRECENT FINANCIAL NEWS:\n${news.map(n => `• ${n.source} (${n.time}h ago): ${n.title}`).join('\n')}` : '\n• Minimal financial news coverage in past 72 hours'}
 
 Write a focused 4-section analysis (90 words). Use EXACT numbered format:
 
 1. MARKET CONTEXT
-Explain TODAY's specific price movement for ${ticker}. What's happening with THIS COMPANY right now? Reference actual news if available. Be specific, not generic.
+Explain TODAY's specific price movement for ${ticker}. What's happening with THIS COMPANY right now?
 
 2. KEY WATCHPOINTS  
-List 2-3 specific metrics/factors investors track for ${ticker}'s business (not generic advice). Use bullet points (•).
+List 2-3 specific metrics/factors investors track for ${ticker}'s business. Use bullet points (•).
 
 3. RISK CONSIDERATIONS
 Identify 1-2 specific risks for ${ticker} at current valuation. Use bullet points (•).
@@ -647,12 +637,10 @@ Identify 1-2 specific risks for ${ticker} at current valuation. Use bullet point
 4. RESEARCH CHECKLIST
 One actionable sentence: what should investors verify about ${ticker} before position sizing?
 
-CRITICAL RULES:
-- Be SPECIFIC to ${ticker}, not generic "market trends"
-- Reference actual news if provided
-- Use plain text, NO markdown (**, __, etc.)
-- Third-person only ("investors examine" not "you should")
-- Factual tone, no predictions
+RULES:
+- Be SPECIFIC to ${ticker}
+- Use plain text, NO markdown
+- Third-person only
 - Start each section with "1.", "2.", "3.", "4."`;
 
     const aiResponse = await fetch("https://openrouter.ai/api/v1/chat/completions", {
@@ -672,9 +660,6 @@ CRITICAL RULES:
     const aiData = await aiResponse.json();
     let aiAnalysis = aiData.choices?.[0]?.message?.content || "";
 
-    // === PROFESSIONAL UI CONSTRUCTION ===
-    
-    // Header: Subtle disclaimer badge
     const headerBadge = `
       <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 12px;background:rgba(15,15,15,0.95);border-bottom:1px solid rgba(46,185,224,0.15);font-size:10px;">
         <span style="color:#888;">🤖 AI-Enhanced Research Tool</span>
@@ -682,7 +667,6 @@ CRITICAL RULES:
       </div>
     `;
 
-    // Price Card: Professional trading interface style
     const priceCard = price ? `
       <div style="background:linear-gradient(135deg,rgba(15,15,15,0.95),rgba(25,25,35,0.95));border:1px solid rgba(46,185,224,0.2);border-radius:12px;padding:20px;margin:16px 0;backdrop-filter:blur(10px);">
         <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px;">
@@ -715,7 +699,6 @@ CRITICAL RULES:
       </div>
     ` : '';
 
-    // Market Signals: Quick visual indicators
     const signalsSection = `
       <div style="margin:16px 0;">
         <div style="font-size:11px;color:#888;text-transform:uppercase;letter-spacing:1px;margin-bottom:12px;">⚡ Market Signals</div>
@@ -737,12 +720,11 @@ CRITICAL RULES:
       </div>
     `;
 
-    // News Feed: Compact and scannable
     const newsSection = news.length ? `
       <div style="margin:16px 0;">
         <div style="font-size:11px;color:#888;text-transform:uppercase;letter-spacing:1px;margin-bottom:12px;">📰 Recent Headlines</div>
-        ${news.map((n, i) => `
-          <div style="padding:12px;margin-bottom:8px;background:rgba(46,185,224,0.04);border-left:3px solid #2eb9e0;border-radius:6px;transition:background 0.2s;" onmouseover="this.style.background='rgba(46,185,224,0.08)'" onmouseout="this.style.background='rgba(46,185,224,0.04)'">
+        ${news.map(n => `
+          <div style="padding:12px;margin-bottom:8px;background:rgba(46,185,224,0.04);border-left:3px solid #2eb9e0;border-radius:6px;">
             <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:4px;">
               <span style="font-size:10px;color:#666;">${n.source}</span>
               <span style="font-size:10px;color:#666;">${n.time}h ago</span>
@@ -754,23 +736,19 @@ CRITICAL RULES:
     ` : `
       <div style="margin:16px 0;padding:16px;background:rgba(107,114,128,0.08);border:1px dashed rgba(107,114,128,0.2);border-radius:8px;text-align:center;">
         <div style="font-size:13px;color:#888;">📭 No major news in past 48 hours</div>
-        <div style="font-size:11px;color:#666;margin-top:4px;">Low media coverage period</div>
       </div>
     `;
 
-    // AI Analysis: Professional format
-    // Split by numbered sections (1., 2., 3., 4.)
     const sectionRegex = /(\d+\.\s+[A-Z\s]+)\n([\s\S]*?)(?=\d+\.\s+[A-Z\s]+|$)/g;
     const sections = [];
     let match;
     
     while ((match = sectionRegex.exec(aiAnalysis)) !== null) {
-      const title = match[1].trim().replace(/^\d+\.\s+/, ''); // Remove number
+      const title = match[1].trim().replace(/^\d+\.\s+/, '');
       const content = match[2].trim();
       sections.push({ title, content });
     }
     
-    // If regex parsing fails, fall back to simple split
     if (sections.length === 0) {
       const parts = aiAnalysis.split(/\d+\.\s+/).filter(s => s.trim());
       if (parts.length >= 4) {
@@ -803,16 +781,8 @@ CRITICAL RULES:
           `;
         }).join('')}
       </div>
-    ` : `
-      <div style="margin:16px 0;">
-        <div style="font-size:11px;color:#888;text-transform:uppercase;letter-spacing:1px;margin-bottom:12px;">💡 Market Analysis</div>
-        <div style="padding:14px;background:rgba(107,114,128,0.06);border-left:3px solid #6b7280;border-radius:6px;">
-          <div style="font-size:13px;line-height:1.6;color:#e0e0e0;">${aiAnalysis}</div>
-        </div>
-      </div>
-    `;
+    ` : '';
 
-    // Action Panel: Next steps (non-prescriptive)
     const actionPanel = `
       <div style="margin:20px 0;padding:16px;background:linear-gradient(135deg,rgba(102,126,234,0.08),rgba(118,75,162,0.08));border:1px solid rgba(102,126,234,0.2);border-radius:10px;">
         <div style="font-size:11px;color:#888;text-transform:uppercase;letter-spacing:1px;margin-bottom:12px;">🎯 Common Next Steps</div>
@@ -833,19 +803,17 @@ CRITICAL RULES:
       </div>
     `;
 
-    // Footer: Minimal, non-intrusive disclaimer
     const footerDisclaimer = `
       <div style="margin-top:20px;padding:12px;background:rgba(0,0,0,0.4);border-top:1px solid rgba(255,255,255,0.05);border-radius:0 0 12px 12px;font-size:10px;line-height:1.5;color:#666;text-align:center;">
         <div style="margin-bottom:4px;">
           <span style="color:#fbbf24;">⚠️</span> <strong style="color:#888;">Educational research tool</strong> • General market information only
         </div>
         <div>
-          Not personalized advice • Always conduct your own due diligence • <a href="#" onclick="alert('Stockly aggregates public market data and provides AI-generated educational context. This information is not tailored to your individual financial situation, goals, or risk tolerance. All investments carry risk of loss. Consult a licensed financial advisor before making investment decisions.\\n\\nMethodology: Market Interest Score calculated from price momentum, news activity, and volume patterns using disclosed formulas.'); return false;" style="color:#2eb9e0;text-decoration:none;">Learn more</a>
+          Not personalized advice • Always conduct your own due diligence
         </div>
       </div>
     `;
 
-    // Assemble final response
     const fullResponse = headerBadge + priceCard + signalsSection + newsSection + formattedAnalysis + actionPanel + footerDisclaimer;
 
     res.json({ result: fullResponse });
