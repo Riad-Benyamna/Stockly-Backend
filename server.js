@@ -378,7 +378,7 @@ RULES:
       <div style="background:linear-gradient(135deg,rgba(15,15,15,0.95),rgba(25,25,35,0.95));border:1px solid rgba(249,115,22,0.3);border-radius:12px;padding:20px;margin:16px 0;backdrop-filter:blur(10px);">
         <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px;">
           <div>
-            <div style="font-size:11px;color:#888;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">Current Price</div>
+            <div style="font-size:11px;color:#888;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">Latest Price</div>
             <div style="font-size:32px;font-weight:700;color:#fff;line-height:1;">$${price}</div>
           </div>
           <div style="text-align:right;">
@@ -671,7 +671,7 @@ RULES:
       <div style="background:linear-gradient(135deg,rgba(15,15,15,0.95),rgba(25,25,35,0.95));border:1px solid rgba(46,185,224,0.2);border-radius:12px;padding:20px;margin:16px 0;backdrop-filter:blur(10px);">
         <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px;">
           <div>
-            <div style="font-size:11px;color:#888;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">Current Price</div>
+            <div style="font-size:11px;color:#888;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">Latest Price</div>
             <div style="font-size:32px;font-weight:700;color:#fff;line-height:1;">$${price}</div>
           </div>
           <div style="text-align:right;">
