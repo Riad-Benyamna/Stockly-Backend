@@ -738,44 +738,30 @@ RULES:
       </div>
     `;
 
-    // Tab navigation with inline event handlers
+    // Tab navigation with inline onclick handlers
     const tabNav = `
       <div style="display:flex;gap:8px;padding:16px 16px 0 16px;background:rgba(15,15,15,0.95);">
-        <button id="tab-simplified" style="flex:1;padding:12px;background:linear-gradient(135deg,#667eea,#764ba2);color:white;border:none;border-radius:8px 8px 0 0;cursor:pointer;font-size:13px;font-weight:600;transition:all 0.2s;">
+        <button id="tab-simplified" onclick="
+          document.getElementById('tab-simplified').style.background='linear-gradient(135deg,#667eea,#764ba2)';
+          document.getElementById('tab-simplified').style.color='white';
+          document.getElementById('tab-detailed').style.background='rgba(255,255,255,0.05)';
+          document.getElementById('tab-detailed').style.color='#888';
+          document.getElementById('content-simplified').style.display='block';
+          document.getElementById('content-detailed').style.display='none';
+        " style="flex:1;padding:12px;background:linear-gradient(135deg,#667eea,#764ba2);color:white;border:none;border-radius:8px 8px 0 0;cursor:pointer;font-size:13px;font-weight:600;transition:all 0.2s;">
           📋 Simplified
         </button>
-        <button id="tab-detailed" style="flex:1;padding:12px;background:rgba(255,255,255,0.05);color:#888;border:none;border-radius:8px 8px 0 0;cursor:pointer;font-size:13px;font-weight:600;transition:all 0.2s;">
+        <button id="tab-detailed" onclick="
+          document.getElementById('tab-simplified').style.background='rgba(255,255,255,0.05)';
+          document.getElementById('tab-simplified').style.color='#888';
+          document.getElementById('tab-detailed').style.background='linear-gradient(135deg,#667eea,#764ba2)';
+          document.getElementById('tab-detailed').style.color='white';
+          document.getElementById('content-simplified').style.display='none';
+          document.getElementById('content-detailed').style.display='block';
+        " style="flex:1;padding:12px;background:rgba(255,255,255,0.05);color:#888;border:none;border-radius:8px 8px 0 0;cursor:pointer;font-size:13px;font-weight:600;transition:all 0.2s;">
           📊 Detailed
         </button>
       </div>
-      <script>
-        setTimeout(function() {
-          const simplifiedTab = document.getElementById('tab-simplified');
-          const detailedTab = document.getElementById('tab-detailed');
-          const simplifiedContent = document.getElementById('content-simplified');
-          const detailedContent = document.getElementById('content-detailed');
-
-          if (simplifiedTab && detailedTab && simplifiedContent && detailedContent) {
-            simplifiedTab.addEventListener('click', function() {
-              simplifiedTab.style.background = 'linear-gradient(135deg,#667eea,#764ba2)';
-              simplifiedTab.style.color = 'white';
-              detailedTab.style.background = 'rgba(255,255,255,0.05)';
-              detailedTab.style.color = '#888';
-              simplifiedContent.style.display = 'block';
-              detailedContent.style.display = 'none';
-            });
-
-            detailedTab.addEventListener('click', function() {
-              simplifiedTab.style.background = 'rgba(255,255,255,0.05)';
-              simplifiedTab.style.color = '#888';
-              detailedTab.style.background = 'linear-gradient(135deg,#667eea,#764ba2)';
-              detailedTab.style.color = 'white';
-              simplifiedContent.style.display = 'none';
-              detailedContent.style.display = 'block';
-            });
-          }
-        }, 100);
-      </script>
     `;
 
     // Simplified content (always shown by default)
