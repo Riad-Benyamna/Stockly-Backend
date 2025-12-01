@@ -799,16 +799,6 @@ RULES:
             <div style="font-size:12px;color:#aaa;margin-bottom:8px;">Sentiment: <span style="color:${sentiment.color};font-weight:600;">${sentiment.label}</span></div>
           </div>
         ` : ''}
-
-        <div style="margin:16px;padding:14px;background:rgba(102,126,234,0.08);border:1px solid rgba(102,126,234,0.2);border-radius:8px;">
-          <div style="font-size:11px;color:#888;text-transform:uppercase;letter-spacing:1px;margin-bottom:10px;">✓ Quick Checklist</div>
-          <div style="font-size:12px;line-height:1.8;color:#d0d0d0;">
-            <div>□ I understand what this company does</div>
-            <div>□ I've read the good signs and warning signs</div>
-            <div>□ I'm comfortable with the risks mentioned</div>
-            <div>□ I've done my own research beyond this tool</div>
-          </div>
-        </div>
       </div>
     `;
 
