@@ -218,3 +218,4 @@ MIT License
 ## ⚖️ Legal Disclaimer
 
 This backend provides educational market data aggregation. Not financial advice. All investments carry risk of loss.
+# Stockly Backend
