@@ -585,32 +585,35 @@ app.post("/analyze", authenticateUser, async (req, res) => {
 
     const sentiment = analyzeNewsSentiment(news, ticker);
 
-    // Calculate research score based on news sentiment
-    let score = 50;
 
-    if (news.length >= 3) score += 15;
-    else if (news.length >= 2) score += 10;
-    else if (news.length >= 1) score += 5;
+    // Simplified analysis prompt
+    const simplifiedPrompt = `You're explaining ${ticker} stock to a complete beginner in simple terms.
 
-    score += (sentiment.score - 50) / 5;
-    score = Math.max(0, Math.min(100, Math.round(score)));
+COMPANY INFO:
+${companyDescription ? `- Business: ${companyDescription.substring(0, 200)}...` : '- Company operates in the financial markets'}
+${companySector ? `- Sector: ${companySector}` : ''}
 
-    // Determine if stock is worth researching further based on news activity
-    let researchSignal = 'Moderate Activity';
-    let researchColor = '#6b7280';
+${news.length ? `RECENT NEWS:\n${news.map(n => `• ${n.source}: ${n.title}`).join('\n')}` : 'RECENT NEWS:\n• Limited news coverage'}
 
-    if (score >= 70) {
-      researchSignal = 'High Interest';
-      researchColor = '#10b981';
-    } else if (score >= 55) {
-      researchSignal = 'Above Average Activity';
-      researchColor = '#3b82f6';
-    } else if (score <= 35) {
-      researchSignal = 'Limited Coverage';
-      researchColor = '#f59e0b';
-    }
+Write a 3-section analysis (100 words total). Use EXACT numbered format:
 
-    const prompt = `You're a financial analyst providing educational research guidance for ${ticker} stock.
+1. WHAT THEY DO
+One clear sentence explaining ${ticker}'s business. Example: "Apple makes iPhones and computers."
+
+2. GOOD SIGNS
+List 2-3 positive facts about ${ticker} from news or business. Use bullets (•). Keep it simple - what's going well?
+
+3. WARNING SIGNS
+List 2-3 concerns or risks about ${ticker}. Use bullets (•). What should someone watch out for?
+
+RULES:
+- Write for a beginner - very simple language
+- NO jargon or technical terms
+- Use plain text, NO markdown
+- Start each section with "1.", "2.", "3."`;
+
+    // Detailed analysis prompt
+    const detailedPrompt = `You're a financial analyst providing educational research guidance for ${ticker} stock.
 
 COMPANY INFO:
 ${companyDescription ? `- Business: ${companyDescription.substring(0, 200)}...` : '- Company operates in the financial markets'}
@@ -619,42 +622,114 @@ ${companyIndustry ? `- Industry: ${companyIndustry}` : ''}
 
 ${news.length ? `RECENT FINANCIAL NEWS:\n${news.map(n => `• ${n.source} (${n.time}h ago): ${n.title}`).join('\n')}` : 'RECENT FINANCIAL NEWS:\n• Limited news coverage in past 72 hours'}
 
-Your task: Help a beginner understand what to research about ${ticker} before investing.
-
 Write a focused 3-section analysis (120 words). Use EXACT numbered format:
 
-1. WHAT THIS COMPANY DOES
-In 2-3 sentences, explain ${ticker}'s business model in simple terms. What do they sell/provide? Who are their customers?
+1. BUSINESS MODEL
+In 2-3 sentences, explain ${ticker}'s business model. What do they sell/provide? Who are their customers? What's their competitive position?
 
 2. KEY RESEARCH QUESTIONS
 List 3-4 specific questions an investor should answer about ${ticker} before investing. Use bullet points (•). Focus on: revenue sources, competitive position, growth drivers, and recent developments.
 
-3. RED FLAGS TO INVESTIGATE
-List 2-3 potential risks or concerns to verify about ${ticker}. Use bullet points (•). Be specific to this company's situation.
+3. RISK FACTORS
+List 2-3 specific risks or concerns to verify about ${ticker}. Use bullet points (•). Be specific to this company's situation.
 
 RULES:
 - Be SPECIFIC to ${ticker} and their actual business
-- Write for beginners - avoid jargon
+- Use technical/professional language
 - Use plain text, NO markdown
 - Third-person only
 - Start each section with "1.", "2.", "3."`;
 
-    const aiResponse = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${OPENROUTER_KEY}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        model: "openai/gpt-4o-mini",
-        messages: [{ role: "user", content: prompt }],
-        max_tokens: 300,
-        temperature: 0.25
+    // Fetch both simplified and detailed analyses
+    const [simplifiedResponse, detailedResponse] = await Promise.all([
+      fetch("https://openrouter.ai/api/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${OPENROUTER_KEY}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          model: "openai/gpt-4o-mini",
+          messages: [{ role: "user", content: simplifiedPrompt }],
+          max_tokens: 250,
+          temperature: 0.25
+        })
+      }),
+      fetch("https://openrouter.ai/api/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${OPENROUTER_KEY}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          model: "openai/gpt-4o-mini",
+          messages: [{ role: "user", content: detailedPrompt }],
+          max_tokens: 300,
+          temperature: 0.25
+        })
       })
-    });
-    
-    const aiData = await aiResponse.json();
-    let aiAnalysis = aiData.choices?.[0]?.message?.content || "";
+    ]);
+
+    const simplifiedData = await simplifiedResponse.json();
+    const detailedData = await detailedResponse.json();
+
+    let simplifiedAnalysis = simplifiedData.choices?.[0]?.message?.content || "";
+    let detailedAnalysis = detailedData.choices?.[0]?.message?.content || "";
+
+    // Parse simplified analysis
+    const parseSimplifiedSections = (text) => {
+      const sectionRegex = /(\d+\.\s+[A-Z\s]+)\n([\s\S]*?)(?=\d+\.\s+[A-Z\s]+|$)/g;
+      const sections = [];
+      let match;
+
+      while ((match = sectionRegex.exec(text)) !== null) {
+        const title = match[1].trim().replace(/^\d+\.\s+/, '');
+        const content = match[2].trim();
+        sections.push({ title, content });
+      }
+
+      if (sections.length === 0) {
+        const parts = text.split(/\d+\.\s+/).filter(s => s.trim());
+        if (parts.length >= 3) {
+          sections.push(
+            { title: 'WHAT THEY DO', content: parts[0] },
+            { title: 'GOOD SIGNS', content: parts[1] },
+            { title: 'WARNING SIGNS', content: parts[2] }
+          );
+        }
+      }
+
+      return sections;
+    };
+
+    // Parse detailed analysis
+    const parseDetailedSections = (text) => {
+      const sectionRegex = /(\d+\.\s+[A-Z\s]+)\n([\s\S]*?)(?=\d+\.\s+[A-Z\s]+|$)/g;
+      const sections = [];
+      let match;
+
+      while ((match = sectionRegex.exec(text)) !== null) {
+        const title = match[1].trim().replace(/^\d+\.\s+/, '');
+        const content = match[2].trim();
+        sections.push({ title, content });
+      }
+
+      if (sections.length === 0) {
+        const parts = text.split(/\d+\.\s+/).filter(s => s.trim());
+        if (parts.length >= 3) {
+          sections.push(
+            { title: 'BUSINESS MODEL', content: parts[0] },
+            { title: 'KEY RESEARCH QUESTIONS', content: parts[1] },
+            { title: 'RISK FACTORS', content: parts[2] }
+          );
+        }
+      }
+
+      return sections;
+    };
+
+    const simplifiedSections = parseSimplifiedSections(simplifiedAnalysis);
+    const detailedSections = parseDetailedSections(detailedAnalysis);
 
     const headerBadge = `
       <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 12px;background:rgba(15,15,15,0.95);border-bottom:1px solid rgba(46,185,224,0.15);font-size:10px;">
@@ -663,119 +738,176 @@ RULES:
       </div>
     `;
 
-    // Company overview card
-    const companyCard = (companyDescription || companySector) ? `
-      <div style="margin:16px 0;">
-        <div style="font-size:11px;color:#888;text-transform:uppercase;letter-spacing:1px;margin-bottom:12px;">🏢 Company Overview</div>
-        <div style="background:linear-gradient(135deg,rgba(15,15,15,0.95),rgba(25,25,35,0.95));border:1px solid rgba(102,126,234,0.2);border-radius:12px;padding:16px;">
-          ${companySector || companyIndustry ? `
-            <div style="display:flex;gap:12px;margin-bottom:12px;flex-wrap:wrap;">
-              ${companySector ? `<span style="padding:6px 12px;background:rgba(102,126,234,0.15);border:1px solid rgba(102,126,234,0.3);border-radius:20px;font-size:11px;color:#667eea;">${companySector}</span>` : ''}
-              ${companyIndustry ? `<span style="padding:6px 12px;background:rgba(59,130,246,0.15);border:1px solid rgba(59,130,246,0.3);border-radius:20px;font-size:11px;color:#3b82f6;">${companyIndustry}</span>` : ''}
-            </div>
-          ` : ''}
-          ${companyDescription ? `
-            <div style="font-size:13px;line-height:1.6;color:#d0d0d0;">${companyDescription.length > 300 ? companyDescription.substring(0, 300) + '...' : companyDescription}</div>
-          ` : '<div style="font-size:13px;line-height:1.6;color:#888;font-style:italic;">Company description not available</div>'}
-        </div>
+    // Tab navigation
+    const tabNav = `
+      <div style="display:flex;gap:8px;padding:16px 16px 0 16px;background:rgba(15,15,15,0.95);">
+        <button onclick="switchTab('simplified')" id="tab-simplified" style="flex:1;padding:12px;background:linear-gradient(135deg,#667eea,#764ba2);color:white;border:none;border-radius:8px 8px 0 0;cursor:pointer;font-size:13px;font-weight:600;transition:all 0.2s;">
+          📋 Simplified
+        </button>
+        <button onclick="switchTab('detailed')" id="tab-detailed" style="flex:1;padding:12px;background:rgba(255,255,255,0.05);color:#888;border:none;border-radius:8px 8px 0 0;cursor:pointer;font-size:13px;font-weight:600;transition:all 0.2s;">
+          📊 Detailed
+        </button>
       </div>
-    ` : '';
+      <script>
+        function switchTab(tab) {
+          const simplifiedTab = document.getElementById('tab-simplified');
+          const detailedTab = document.getElementById('tab-detailed');
+          const simplifiedContent = document.getElementById('content-simplified');
+          const detailedContent = document.getElementById('content-detailed');
 
-    // Research signal card
-    const researchSignalCard = `
-      <div style="margin:16px 0;">
-        <div style="font-size:11px;color:#888;text-transform:uppercase;letter-spacing:1px;margin-bottom:12px;">📊 Research Signal</div>
-        <div style="background:linear-gradient(135deg,rgba(15,15,15,0.95),rgba(25,25,35,0.95));border:1px solid rgba(${researchColor === '#10b981' ? '16,185,129' : researchColor === '#3b82f6' ? '59,130,246' : researchColor === '#f59e0b' ? '245,158,11' : '107,114,128'},0.3);border-radius:12px;padding:20px;text-align:center;">
-          <div style="font-size:14px;color:#888;margin-bottom:8px;">CURRENT STATUS</div>
-          <div style="font-size:24px;font-weight:700;color:${researchColor};margin-bottom:4px;">${researchSignal}</div>
-          <div style="font-size:12px;color:#888;">Based on news coverage and sentiment</div>
-        </div>
-      </div>
+          if (tab === 'simplified') {
+            simplifiedTab.style.background = 'linear-gradient(135deg,#667eea,#764ba2)';
+            simplifiedTab.style.color = 'white';
+            detailedTab.style.background = 'rgba(255,255,255,0.05)';
+            detailedTab.style.color = '#888';
+            simplifiedContent.style.display = 'block';
+            detailedContent.style.display = 'none';
+          } else {
+            simplifiedTab.style.background = 'rgba(255,255,255,0.05)';
+            simplifiedTab.style.color = '#888';
+            detailedTab.style.background = 'linear-gradient(135deg,#667eea,#764ba2)';
+            detailedTab.style.color = 'white';
+            simplifiedContent.style.display = 'none';
+            detailedContent.style.display = 'block';
+          }
+        }
+      </script>
     `;
 
-    const newsSection = news.length ? `
-      <div style="margin:16px 0;">
-        <div style="font-size:11px;color:#888;text-transform:uppercase;letter-spacing:1px;margin-bottom:12px;">📰 Recent Headlines</div>
-        ${news.map(n => `
-          <div style="padding:12px;margin-bottom:8px;background:rgba(46,185,224,0.04);border-left:3px solid #2eb9e0;border-radius:6px;">
-            <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:4px;">
-              <span style="font-size:10px;color:#666;">${n.source}</span>
-              <span style="font-size:10px;color:#666;">${n.time}h ago</span>
-            </div>
-            <div style="font-size:13px;line-height:1.4;color:#e0e0e0;">${n.title}</div>
-          </div>
-        `).join('')}
-      </div>
-    ` : `
-      <div style="margin:16px 0;padding:16px;background:rgba(107,114,128,0.08);border:1px dashed rgba(107,114,128,0.2);border-radius:8px;text-align:center;">
-        <div style="font-size:13px;color:#888;">📭 No major news in past 48 hours</div>
-      </div>
-    `;
-
-    const sectionRegex = /(\d+\.\s+[A-Z\s]+)\n([\s\S]*?)(?=\d+\.\s+[A-Z\s]+|$)/g;
-    const sections = [];
-    let match;
-    
-    while ((match = sectionRegex.exec(aiAnalysis)) !== null) {
-      const title = match[1].trim().replace(/^\d+\.\s+/, '');
-      const content = match[2].trim();
-      sections.push({ title, content });
-    }
-    
-    if (sections.length === 0) {
-      const parts = aiAnalysis.split(/\d+\.\s+/).filter(s => s.trim());
-      if (parts.length >= 3) {
-        sections.push(
-          { title: 'WHAT THIS COMPANY DOES', content: parts[0] },
-          { title: 'KEY RESEARCH QUESTIONS', content: parts[1] },
-          { title: 'RED FLAGS TO INVESTIGATE', content: parts[2] }
-        );
-      }
-    }
-
-    const sectionColors = {
-      'WHAT THIS COMPANY DOES': { bg: 'rgba(102,126,234,0.06)', border: '#667eea', icon: '🏢' },
-      'KEY RESEARCH QUESTIONS': { bg: 'rgba(59,130,246,0.06)', border: '#3b82f6', icon: '🔍' },
-      'RED FLAGS TO INVESTIGATE': { bg: 'rgba(239,68,68,0.06)', border: '#ef4444', icon: '⚠️' }
+    // Simplified content (always shown by default)
+    const simplifiedSectionColors = {
+      'WHAT THEY DO': { bg: 'rgba(102,126,234,0.08)', border: '#667eea', icon: '🏢' },
+      'GOOD SIGNS': { bg: 'rgba(16,185,129,0.08)', border: '#10b981', icon: '✅' },
+      'WARNING SIGNS': { bg: 'rgba(245,158,11,0.08)', border: '#f59e0b', icon: '⚠️' }
     };
 
-    const formattedAnalysis = sections.length >= 3 ? `
-      <div style="margin:16px 0;">
-        <div style="font-size:11px;color:#888;text-transform:uppercase;letter-spacing:1px;margin-bottom:12px;">🎓 Research Guide</div>
-        ${sections.map(section => {
-          const style = sectionColors[section.title] || { bg: 'rgba(107,114,128,0.06)', border: '#6b7280', icon: '•' };
-          return `
-            <div style="margin-bottom:16px;padding:14px;background:${style.bg};border-left:3px solid ${style.border};border-radius:6px;">
-              <div style="font-size:10px;color:${style.border};font-weight:700;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">${style.icon} ${section.title}</div>
-              <div style="font-size:13px;line-height:1.6;color:#e0e0e0;">${section.content}</div>
-            </div>
-          `;
-        }).join('')}
-      </div>
-    ` : '';
+    const simplifiedContent = `
+      <div id="content-simplified" style="display:block;">
+        ${companySector ? `
+          <div style="margin:16px;padding:10px;background:rgba(102,126,234,0.1);border-radius:8px;text-align:center;">
+            <span style="font-size:12px;color:#667eea;font-weight:600;">${companySector}${companyIndustry ? ` • ${companyIndustry}` : ''}</span>
+          </div>
+        ` : ''}
 
-    const actionPanel = `
-      <div style="margin:20px 0;padding:16px;background:linear-gradient(135deg,rgba(102,126,234,0.08),rgba(118,75,162,0.08));border:1px solid rgba(102,126,234,0.2);border-radius:10px;">
-        <div style="font-size:11px;color:#888;text-transform:uppercase;letter-spacing:1px;margin-bottom:12px;">📝 Before Investing</div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:12px;">
-          <div style="padding:8px;background:rgba(0,0,0,0.3);border-radius:6px;color:#d0d0d0;">
-            <span style="color:#667eea;">□</span> Read earnings reports
+        ${simplifiedSections.length >= 3 ? `
+          <div style="padding:16px;">
+            ${simplifiedSections.map(section => {
+              const style = simplifiedSectionColors[section.title] || { bg: 'rgba(107,114,128,0.06)', border: '#6b7280', icon: '•' };
+              return `
+                <div style="margin-bottom:20px;padding:16px;background:${style.bg};border-left:4px solid ${style.border};border-radius:8px;">
+                  <div style="font-size:11px;color:${style.border};font-weight:700;text-transform:uppercase;letter-spacing:1px;margin-bottom:10px;">${style.icon} ${section.title}</div>
+                  <div style="font-size:14px;line-height:1.7;color:#e0e0e0;">${section.content}</div>
+                </div>
+              `;
+            }).join('')}
           </div>
-          <div style="padding:8px;background:rgba(0,0,0,0.3);border-radius:6px;color:#d0d0d0;">
-            <span style="color:#667eea;">□</span> Check competitor news
+        ` : '<div style="padding:40px 20px;text-align:center;color:#888;">Analysis not available</div>'}
+
+        ${news.length ? `
+          <div style="padding:0 16px 16px 16px;">
+            <div style="font-size:11px;color:#888;text-transform:uppercase;letter-spacing:1px;margin-bottom:12px;">📰 Recent News (${news.length})</div>
+            <div style="font-size:12px;color:#aaa;margin-bottom:8px;">Sentiment: <span style="color:${sentiment.color};font-weight:600;">${sentiment.label}</span></div>
           </div>
-          <div style="padding:8px;background:rgba(0,0,0,0.3);border-radius:6px;color:#d0d0d0;">
-            <span style="color:#667eea;">□</span> Review recent filings
+        ` : ''}
+
+        <div style="margin:16px;padding:14px;background:rgba(102,126,234,0.08);border:1px solid rgba(102,126,234,0.2);border-radius:8px;">
+          <div style="font-size:11px;color:#888;text-transform:uppercase;letter-spacing:1px;margin-bottom:10px;">✓ Quick Checklist</div>
+          <div style="font-size:12px;line-height:1.8;color:#d0d0d0;">
+            <div>□ I understand what this company does</div>
+            <div>□ I've read the good signs and warning signs</div>
+            <div>□ I'm comfortable with the risks mentioned</div>
+            <div>□ I've done my own research beyond this tool</div>
           </div>
-          <div style="padding:8px;background:rgba(0,0,0,0.3);border-radius:6px;color:#d0d0d0;">
-            <span style="color:#667eea;">□</span> Understand the risks
+        </div>
+      </div>
+    `;
+
+    // Detailed content (hidden by default)
+    const detailedSectionColors = {
+      'BUSINESS MODEL': { bg: 'rgba(102,126,234,0.06)', border: '#667eea', icon: '🏢' },
+      'KEY RESEARCH QUESTIONS': { bg: 'rgba(59,130,246,0.06)', border: '#3b82f6', icon: '🔍' },
+      'RISK FACTORS': { bg: 'rgba(239,68,68,0.06)', border: '#ef4444', icon: '⚠️' }
+    };
+
+    const detailedContent = `
+      <div id="content-detailed" style="display:none;">
+        ${companyDescription || companySector ? `
+          <div style="margin:16px;">
+            <div style="font-size:11px;color:#888;text-transform:uppercase;letter-spacing:1px;margin-bottom:12px;">🏢 Company Overview</div>
+            <div style="background:linear-gradient(135deg,rgba(15,15,15,0.95),rgba(25,25,35,0.95));border:1px solid rgba(102,126,234,0.2);border-radius:12px;padding:16px;">
+              ${companySector || companyIndustry ? `
+                <div style="display:flex;gap:12px;margin-bottom:12px;flex-wrap:wrap;">
+                  ${companySector ? `<span style="padding:6px 12px;background:rgba(102,126,234,0.15);border:1px solid rgba(102,126,234,0.3);border-radius:20px;font-size:11px;color:#667eea;">${companySector}</span>` : ''}
+                  ${companyIndustry ? `<span style="padding:6px 12px;background:rgba(59,130,246,0.15);border:1px solid rgba(59,130,246,0.3);border-radius:20px;font-size:11px;color:#3b82f6;">${companyIndustry}</span>` : ''}
+                </div>
+              ` : ''}
+              ${companyDescription ? `
+                <div style="font-size:13px;line-height:1.6;color:#d0d0d0;">${companyDescription.length > 350 ? companyDescription.substring(0, 350) + '...' : companyDescription}</div>
+              ` : '<div style="font-size:13px;line-height:1.6;color:#888;font-style:italic;">Company description not available</div>'}
+            </div>
+          </div>
+        ` : ''}
+
+        ${news.length ? `
+          <div style="margin:16px;">
+            <div style="font-size:11px;color:#888;text-transform:uppercase;letter-spacing:1px;margin-bottom:12px;">📰 Recent Headlines</div>
+            ${news.map(n => `
+              <div style="padding:12px;margin-bottom:8px;background:rgba(46,185,224,0.04);border-left:3px solid #2eb9e0;border-radius:6px;">
+                <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:4px;">
+                  <span style="font-size:10px;color:#666;">${n.source}</span>
+                  <span style="font-size:10px;color:#666;">${n.time}h ago</span>
+                </div>
+                <div style="font-size:13px;line-height:1.4;color:#e0e0e0;">${n.title}</div>
+              </div>
+            `).join('')}
+            <div style="margin-top:12px;padding:10px;background:rgba(${sentiment.color === '#10b981' ? '16,185,129' : sentiment.color === '#ef4444' ? '239,68,68' : '107,114,128'},0.1);border-radius:6px;">
+              <span style="font-size:11px;color:#888;">Overall Sentiment: </span>
+              <span style="color:${sentiment.color};font-weight:600;font-size:12px;">${sentiment.label} (${sentiment.score}/100)</span>
+            </div>
+          </div>
+        ` : `
+          <div style="margin:16px;padding:16px;background:rgba(107,114,128,0.08);border:1px dashed rgba(107,114,128,0.2);border-radius:8px;text-align:center;">
+            <div style="font-size:13px;color:#888;">📭 Limited news coverage in past 72 hours</div>
+          </div>
+        `}
+
+        ${detailedSections.length >= 3 ? `
+          <div style="margin:16px;">
+            <div style="font-size:11px;color:#888;text-transform:uppercase;letter-spacing:1px;margin-bottom:12px;">🎓 Research Guide</div>
+            ${detailedSections.map(section => {
+              const style = detailedSectionColors[section.title] || { bg: 'rgba(107,114,128,0.06)', border: '#6b7280', icon: '•' };
+              return `
+                <div style="margin-bottom:16px;padding:14px;background:${style.bg};border-left:3px solid ${style.border};border-radius:6px;">
+                  <div style="font-size:10px;color:${style.border};font-weight:700;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">${style.icon} ${section.title}</div>
+                  <div style="font-size:13px;line-height:1.6;color:#e0e0e0;">${section.content}</div>
+                </div>
+              `;
+            }).join('')}
+          </div>
+        ` : ''}
+
+        <div style="margin:16px;padding:16px;background:linear-gradient(135deg,rgba(102,126,234,0.08),rgba(118,75,162,0.08));border:1px solid rgba(102,126,234,0.2);border-radius:10px;">
+          <div style="font-size:11px;color:#888;text-transform:uppercase;letter-spacing:1px;margin-bottom:12px;">📝 Before Investing</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:12px;">
+            <div style="padding:8px;background:rgba(0,0,0,0.3);border-radius:6px;color:#d0d0d0;">
+              <span style="color:#667eea;">□</span> Read earnings reports
+            </div>
+            <div style="padding:8px;background:rgba(0,0,0,0.3);border-radius:6px;color:#d0d0d0;">
+              <span style="color:#667eea;">□</span> Check competitor news
+            </div>
+            <div style="padding:8px;background:rgba(0,0,0,0.3);border-radius:6px;color:#d0d0d0;">
+              <span style="color:#667eea;">□</span> Review recent filings
+            </div>
+            <div style="padding:8px;background:rgba(0,0,0,0.3);border-radius:6px;color:#d0d0d0;">
+              <span style="color:#667eea;">□</span> Understand the risks
+            </div>
           </div>
         </div>
       </div>
     `;
 
     const footerDisclaimer = `
-      <div style="margin-top:20px;padding:12px;background:rgba(0,0,0,0.4);border-top:1px solid rgba(255,255,255,0.05);border-radius:0 0 12px 12px;font-size:10px;line-height:1.5;color:#666;text-align:center;">
+      <div style="padding:12px;background:rgba(0,0,0,0.4);border-top:1px solid rgba(255,255,255,0.05);font-size:10px;line-height:1.5;color:#666;text-align:center;">
         <div style="margin-bottom:4px;">
           <span style="color:#fbbf24;">⚠️</span> <strong style="color:#888;">Educational research tool</strong> • General market information only
         </div>
@@ -785,7 +917,7 @@ RULES:
       </div>
     `;
 
-    const fullResponse = headerBadge + companyCard + researchSignalCard + newsSection + formattedAnalysis + actionPanel + footerDisclaimer;
+    const fullResponse = headerBadge + tabNav + simplifiedContent + detailedContent + footerDisclaimer;
 
     res.json({ result: fullResponse });
 
