@@ -578,6 +578,107 @@ app.post("/analyze", authenticateUser, async (req, res) => {
       console.error("Yahoo Finance fetch error:", e.message);
     }
 
+    // Fetch insider trading data from SEC EDGAR
+    let insiderData = null;
+    try {
+      const cikResponse = await fetch(`https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&ticker=${ticker}&type=4&dateb=&owner=only&count=100&output=atom`, {
+        headers: {
+          'User-Agent': 'Stockly stockly@example.com'
+        }
+      });
+      const cikText = await cikResponse.text();
+
+      // Parse Form 4 filings (insider trading)
+      const transactions = [];
+      const entryMatches = cikText.matchAll(/<entry>([\s\S]*?)<\/entry>/g);
+
+      for (const entryMatch of entryMatches) {
+        const entry = entryMatch[1];
+        const titleMatch = entry.match(/<title>(.*?)<\/title>/);
+        const dateMatch = entry.match(/<updated>(.*?)<\/updated>/);
+
+        if (titleMatch && dateMatch) {
+          const title = titleMatch[1];
+          const date = new Date(dateMatch[1]);
+          const daysAgo = Math.floor((Date.now() - date.getTime()) / (1000 * 60 * 60 * 24));
+
+          // Only include filings from last 90 days
+          if (daysAgo <= 90) {
+            // Extract transaction type (BUY/SELL) from title
+            const isSale = title.toLowerCase().includes('sale') || title.toLowerCase().includes('sell') || title.toLowerCase().includes('disposed');
+            const isPurchase = title.toLowerCase().includes('purchase') || title.toLowerCase().includes('buy') || title.toLowerCase().includes('acquired');
+
+            // Extract officer title (CEO, CFO, etc.)
+            let role = 'Insider';
+            if (title.toLowerCase().includes('ceo') || title.toLowerCase().includes('chief executive')) role = 'CEO';
+            else if (title.toLowerCase().includes('cfo') || title.toLowerCase().includes('chief financial')) role = 'CFO';
+            else if (title.toLowerCase().includes('coo') || title.toLowerCase().includes('chief operating')) role = 'COO';
+            else if (title.toLowerCase().includes('director')) role = 'Director';
+            else if (title.toLowerCase().includes('president')) role = 'President';
+            else if (title.toLowerCase().includes('officer')) role = 'Officer';
+
+            transactions.push({
+              role,
+              type: isSale ? 'SELL' : isPurchase ? 'BUY' : 'OTHER',
+              daysAgo,
+              title: title.substring(0, 100)
+            });
+          }
+        }
+      }
+
+      // Calculate insider flow
+      const recentBuys = transactions.filter(t => t.type === 'BUY').length;
+      const recentSells = transactions.filter(t => t.type === 'SELL').length;
+      const netFlow = recentBuys - recentSells;
+
+      if (transactions.length > 0) {
+        insiderData = {
+          transactions: transactions.slice(0, 5), // Show top 5 most recent
+          totalBuys: recentBuys,
+          totalSells: recentSells,
+          netFlow,
+          sentiment: netFlow > 0 ? 'Bullish' : netFlow < 0 ? 'Bearish' : 'Neutral'
+        };
+      }
+    } catch (e) {
+      console.error("Insider data fetch error:", e.message);
+    }
+
+    // Fetch social sentiment data
+    let socialSentiment = null;
+    try {
+      // Try StockTwits API (public, no auth needed for basic data)
+      const stocktwitsRes = await fetch(`https://api.stocktwits.com/api/2/streams/symbol/${ticker}.json`);
+      const stocktwitsData = await stocktwitsRes.json();
+
+      if (stocktwitsData && stocktwitsData.messages) {
+        const messages = stocktwitsData.messages.slice(0, 20);
+        let bullishCount = 0;
+        let bearishCount = 0;
+
+        messages.forEach(msg => {
+          if (msg.entities && msg.entities.sentiment) {
+            if (msg.entities.sentiment.basic === 'Bullish') bullishCount++;
+            if (msg.entities.sentiment.basic === 'Bearish') bearishCount++;
+          }
+        });
+
+        const totalSentiment = bullishCount + bearishCount;
+        const bullishPct = totalSentiment > 0 ? Math.round((bullishCount / totalSentiment) * 100) : 50;
+
+        socialSentiment = {
+          source: 'StockTwits',
+          bullishPct,
+          bearishPct: 100 - bullishPct,
+          volume: messages.length,
+          sentiment: bullishPct > 60 ? 'Bullish' : bullishPct < 40 ? 'Bearish' : 'Neutral'
+        };
+      }
+    } catch (e) {
+      console.error("Social sentiment fetch error:", e.message);
+    }
+
     let news = [];
     if (NEWS_KEY) {
       try {
@@ -930,6 +1031,73 @@ RULES:
           </div>
         ` : ''}
 
+        ${insiderData ? `
+          <div style="margin:16px;">
+            <div style="font-size:11px;color:#888;text-transform:uppercase;letter-spacing:1px;margin-bottom:12px;">👔 Insider Activity (90 Days)</div>
+            <div style="background:linear-gradient(135deg,rgba(15,15,15,0.95),rgba(25,25,35,0.95));border:1px solid rgba(139,92,246,0.3);border-radius:12px;padding:16px;">
+              <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:12px;">
+                <div style="text-align:center;padding:8px;background:rgba(16,185,129,0.1);border-radius:6px;">
+                  <div style="font-size:10px;color:#888;margin-bottom:4px;">BUYS</div>
+                  <div style="font-size:18px;font-weight:700;color:#10b981;">${insiderData.totalBuys}</div>
+                </div>
+                <div style="text-align:center;padding:8px;background:rgba(239,68,68,0.1);border-radius:6px;">
+                  <div style="font-size:10px;color:#888;margin-bottom:4px;">SELLS</div>
+                  <div style="font-size:18px;font-weight:700;color:#ef4444;">${insiderData.totalSells}</div>
+                </div>
+                <div style="text-align:center;padding:8px;background:rgba(139,92,246,0.1);border-radius:6px;">
+                  <div style="font-size:10px;color:#888;margin-bottom:4px;">NET FLOW</div>
+                  <div style="font-size:18px;font-weight:700;color:${insiderData.netFlow > 0 ? '#10b981' : insiderData.netFlow < 0 ? '#ef4444' : '#888'};">${insiderData.netFlow > 0 ? '+' : ''}${insiderData.netFlow}</div>
+                </div>
+              </div>
+              <div style="margin-bottom:12px;">
+                <div style="font-size:10px;color:#888;margin-bottom:8px;">Recent Transactions:</div>
+                ${insiderData.transactions.map(t => `
+                  <div style="padding:8px;margin-bottom:4px;background:rgba(${t.type === 'BUY' ? '16,185,129' : '239,68,68'},0.08);border-left:3px solid ${t.type === 'BUY' ? '#10b981' : '#ef4444'};border-radius:4px;">
+                    <div style="display:flex;justify-content:space-between;align-items:center;">
+                      <span style="font-size:11px;color:#d0d0d0;"><strong>${t.role}</strong> ${t.type === 'BUY' ? '📈 BOUGHT' : '📉 SOLD'}</span>
+                      <span style="font-size:10px;color:#888;">${t.daysAgo}d ago</span>
+                    </div>
+                  </div>
+                `).join('')}
+              </div>
+              <div style="padding:8px;background:rgba(139,92,246,0.08);border-radius:6px;">
+                <div style="font-size:11px;color:#8b5cf6;">🔍 Research Question:</div>
+                <div style="font-size:12px;color:#d0d0d0;margin-top:4px;">Why are insiders ${insiderData.sentiment === 'Bullish' ? 'buying' : insiderData.sentiment === 'Bearish' ? 'selling' : 'trading'}? Consider tax planning, diversification, or conviction signals.</div>
+              </div>
+            </div>
+          </div>
+        ` : ''}
+
+        ${socialSentiment ? `
+          <div style="margin:16px;">
+            <div style="font-size:11px;color:#888;text-transform:uppercase;letter-spacing:1px;margin-bottom:12px;">📱 Social Sentiment</div>
+            <div style="background:linear-gradient(135deg,rgba(15,15,15,0.95),rgba(25,25,35,0.95));border:1px solid rgba(236,72,153,0.3);border-radius:12px;padding:16px;">
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+                <div>
+                  <div style="font-size:10px;color:#888;">Source: ${socialSentiment.source}</div>
+                  <div style="font-size:16px;font-weight:700;color:${socialSentiment.sentiment === 'Bullish' ? '#10b981' : socialSentiment.sentiment === 'Bearish' ? '#ef4444' : '#f59e0b'};">${socialSentiment.sentiment}</div>
+                </div>
+                <div style="text-align:right;">
+                  <div style="font-size:10px;color:#888;">Volume</div>
+                  <div style="font-size:16px;font-weight:700;color:#ec4899;">${socialSentiment.volume} posts</div>
+                </div>
+              </div>
+              <div style="display:flex;gap:8px;margin-bottom:12px;">
+                <div style="flex:${socialSentiment.bullishPct};background:rgba(16,185,129,0.6);height:24px;border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:11px;color:#fff;font-weight:600;">
+                  ${socialSentiment.bullishPct}% 🐂
+                </div>
+                <div style="flex:${socialSentiment.bearishPct};background:rgba(239,68,68,0.6);height:24px;border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:11px;color:#fff;font-weight:600;">
+                  ${socialSentiment.bearishPct}% 🐻
+                </div>
+              </div>
+              <div style="padding:8px;background:rgba(236,72,153,0.08);border-radius:6px;">
+                <div style="font-size:11px;color:#ec4899;">⚠️ Research Warning:</div>
+                <div style="font-size:12px;color:#d0d0d0;margin-top:4px;">${socialSentiment.sentiment === 'Bullish' ? 'High retail bullishness can signal near-term tops. Check if fundamentals support the hype.' : socialSentiment.sentiment === 'Bearish' ? 'Heavy bearish sentiment may indicate oversold conditions or real concerns. Verify the reasons.' : 'Mixed sentiment suggests uncertainty. Look for catalysts that could shift opinion.'}</div>
+              </div>
+            </div>
+          </div>
+        ` : ''}
+
         ${news.length ? `
           <div style="margin:16px;">
             <div style="font-size:11px;color:#888;text-transform:uppercase;letter-spacing:1px;margin-bottom:12px;">📰 Recent Headlines</div>
@@ -965,6 +1133,61 @@ RULES:
                 </div>
               `;
             }).join('')}
+          </div>
+        ` : ''}
+
+        ${realtimePrice ? `
+          <div style="margin:16px;">
+            <div style="font-size:11px;color:#888;text-transform:uppercase;letter-spacing:1px;margin-bottom:12px;">🔔 Price Alerts</div>
+            <div style="background:linear-gradient(135deg,rgba(15,15,15,0.95),rgba(25,25,35,0.95));border:1px solid rgba(34,197,94,0.3);border-radius:12px;padding:16px;">
+              <div style="margin-bottom:12px;">
+                <div style="font-size:12px;color:#d0d0d0;margin-bottom:8px;">Get notified when ${ticker} hits your target price:</div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+                  <div>
+                    <label style="font-size:10px;color:#888;display:block;margin-bottom:4px;">Alert Above</label>
+                    <input type="number" id="alert-above-${ticker}" placeholder="$${(realtimePrice * 1.05).toFixed(2)}" style="width:100%;padding:8px;background:rgba(0,0,0,0.4);border:1px solid rgba(34,197,94,0.3);border-radius:6px;color:#fff;font-size:13px;" />
+                  </div>
+                  <div>
+                    <label style="font-size:10px;color:#888;display:block;margin-bottom:4px;">Alert Below</label>
+                    <input type="number" id="alert-below-${ticker}" placeholder="$${(realtimePrice * 0.95).toFixed(2)}" style="width:100%;padding:8px;background:rgba(0,0,0,0.4);border:1px solid rgba(239,68,68,0.3);border-radius:6px;color:#fff;font-size:13px;" />
+                  </div>
+                </div>
+                <button id="set-alert-${ticker}" onclick="
+                  const aboveInput = document.getElementById('alert-above-${ticker}');
+                  const belowInput = document.getElementById('alert-below-${ticker}');
+                  const abovePrice = parseFloat(aboveInput.value);
+                  const belowPrice = parseFloat(belowInput.value);
+
+                  if (!abovePrice && !belowPrice) {
+                    alert('Please enter at least one price alert');
+                    return;
+                  }
+
+                  chrome.runtime.sendMessage({
+                    action: 'setPriceAlert',
+                    ticker: '${ticker}',
+                    alertData: {
+                      abovePrice: abovePrice || null,
+                      belowPrice: belowPrice || null
+                    }
+                  }, (response) => {
+                    if (response && response.success) {
+                      alert('Price alert set! You will be notified when ${ticker} reaches your target.');
+                      aboveInput.value = '';
+                      belowInput.value = '';
+                    } else {
+                      alert('Failed to set alert. Please try again.');
+                    }
+                  });
+                " style="width:100%;margin-top:8px;padding:10px;background:linear-gradient(135deg,#22c55e,#16a34a);color:white;border:none;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;">
+                  🔔 Set Price Alert
+                </button>
+              </div>
+              <div style="padding:8px;background:rgba(34,197,94,0.08);border-radius:6px;">
+                <div style="font-size:11px;color:#22c55e;">💡 Educational Note:</div>
+                <div style="font-size:12px;color:#d0d0d0;margin-top:4px;">Price alerts help you catch opportunities without watching charts all day. They're research tools, not trading signals.</div>
+              </div>
+            </div>
           </div>
         ` : ''}
 
