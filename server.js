@@ -1038,6 +1038,30 @@ CRITICAL RULES:
 
     const detailedContent = `
       <div id="content-detailed" style="display:none;">
+        ${analystRatings ? `
+          <div style="margin:16px;">
+            <div style="font-size:11px;color:#888;text-transform:uppercase;letter-spacing:1px;margin-bottom:12px;">🎯 Wall Street Consensus</div>
+            <div style="background:linear-gradient(135deg,rgba(15,15,15,0.95),rgba(25,25,35,0.95));border:1px solid rgba(102,126,234,0.2);border-radius:12px;padding:16px;">
+              <div style="display:flex;gap:8px;margin-bottom:12px;">
+                ${analystRatings.strongBuy > 0 ? `<div style="flex:${analystRatings.strongBuy};background:rgba(16,185,129,0.8);height:24px;border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:10px;color:#fff;font-weight:600;">${analystRatings.strongBuy}</div>` : ''}
+                ${analystRatings.buy > 0 ? `<div style="flex:${analystRatings.buy};background:rgba(16,185,129,0.5);height:24px;border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:10px;color:#fff;font-weight:600;">${analystRatings.buy}</div>` : ''}
+                ${analystRatings.hold > 0 ? `<div style="flex:${analystRatings.hold};background:rgba(245,158,11,0.5);height:24px;border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:10px;color:#fff;font-weight:600;">${analystRatings.hold}</div>` : ''}
+                ${analystRatings.sell > 0 ? `<div style="flex:${analystRatings.sell};background:rgba(239,68,68,0.5);height:24px;border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:10px;color:#fff;font-weight:600;">${analystRatings.sell}</div>` : ''}
+                ${analystRatings.strongSell > 0 ? `<div style="flex:${analystRatings.strongSell};background:rgba(239,68,68,0.8);height:24px;border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:10px;color:#fff;font-weight:600;">${analystRatings.strongSell}</div>` : ''}
+              </div>
+              <div style="display:flex;justify-content:space-between;font-size:11px;color:#888;">
+                <span>🟢 ${analystRatings.strongBuy + analystRatings.buy} Buy</span>
+                <span>🟡 ${analystRatings.hold} Hold</span>
+                <span>🔴 ${analystRatings.sell + analystRatings.strongSell} Sell</span>
+              </div>
+              <div style="margin-top:10px;padding:8px;background:rgba(102,126,234,0.08);border-radius:6px;">
+                <div style="font-size:11px;color:#667eea;">🔍 Research Question:</div>
+                <div style="font-size:12px;color:#d0d0d0;margin-top:4px;">What's driving the analyst consensus? Check recent upgrades/downgrades.</div>
+              </div>
+            </div>
+          </div>
+        ` : ''}
+
         ${companyDescription || companySector ? `
           <div style="margin:16px;">
             <div style="font-size:11px;color:#888;text-transform:uppercase;letter-spacing:1px;margin-bottom:12px;">🏢 Company Overview</div>
@@ -1090,30 +1114,6 @@ CRITICAL RULES:
               <div style="padding:8px;background:rgba(249,115,22,0.08);border-radius:6px;margin-top:8px;">
                 <div style="font-size:11px;color:#f97316;">💡 Educational Note:</div>
                 <div style="font-size:12px;color:#d0d0d0;margin-top:4px;">High volume = easier to buy/sell. Low P/E might mean undervalued or slow growth. Always compare with industry peers.</div>
-              </div>
-            </div>
-          </div>
-        ` : ''}
-
-        ${analystRatings ? `
-          <div style="margin:16px;">
-            <div style="font-size:11px;color:#888;text-transform:uppercase;letter-spacing:1px;margin-bottom:12px;">🎯 Wall Street Consensus</div>
-            <div style="background:linear-gradient(135deg,rgba(15,15,15,0.95),rgba(25,25,35,0.95));border:1px solid rgba(102,126,234,0.2);border-radius:12px;padding:16px;">
-              <div style="display:flex;gap:8px;margin-bottom:12px;">
-                ${analystRatings.strongBuy > 0 ? `<div style="flex:${analystRatings.strongBuy};background:rgba(16,185,129,0.8);height:24px;border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:10px;color:#fff;font-weight:600;">${analystRatings.strongBuy}</div>` : ''}
-                ${analystRatings.buy > 0 ? `<div style="flex:${analystRatings.buy};background:rgba(16,185,129,0.5);height:24px;border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:10px;color:#fff;font-weight:600;">${analystRatings.buy}</div>` : ''}
-                ${analystRatings.hold > 0 ? `<div style="flex:${analystRatings.hold};background:rgba(245,158,11,0.5);height:24px;border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:10px;color:#fff;font-weight:600;">${analystRatings.hold}</div>` : ''}
-                ${analystRatings.sell > 0 ? `<div style="flex:${analystRatings.sell};background:rgba(239,68,68,0.5);height:24px;border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:10px;color:#fff;font-weight:600;">${analystRatings.sell}</div>` : ''}
-                ${analystRatings.strongSell > 0 ? `<div style="flex:${analystRatings.strongSell};background:rgba(239,68,68,0.8);height:24px;border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:10px;color:#fff;font-weight:600;">${analystRatings.strongSell}</div>` : ''}
-              </div>
-              <div style="display:flex;justify-content:space-between;font-size:11px;color:#888;">
-                <span>🟢 ${analystRatings.strongBuy + analystRatings.buy} Buy</span>
-                <span>🟡 ${analystRatings.hold} Hold</span>
-                <span>🔴 ${analystRatings.sell + analystRatings.strongSell} Sell</span>
-              </div>
-              <div style="margin-top:10px;padding:8px;background:rgba(102,126,234,0.08);border-radius:6px;">
-                <div style="font-size:11px;color:#667eea;">🔍 Research Question:</div>
-                <div style="font-size:12px;color:#d0d0d0;margin-top:4px;">What's driving the analyst consensus? Check recent upgrades/downgrades.</div>
               </div>
             </div>
           </div>
