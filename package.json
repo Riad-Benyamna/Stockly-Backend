@@ -11,7 +11,8 @@
     "dotenv": "^17.2.3",
     "express": "^5.1.0",
     "node-fetch": "^3.3.2",
-    "pg": "^8.11.3"
+    "pg": "^8.11.3",
+    "yahoo-finance2": "^3.10.2"
   },
   "engines": {
     "node": "18.x"

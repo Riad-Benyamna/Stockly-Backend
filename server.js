@@ -4,6 +4,7 @@ const { Pool } = require("pg");
 const crypto = require("crypto");
 require("dotenv").config();
 const fetch = (...args) => import("node-fetch").then(({ default: fetch }) => fetch(...args));
+const yahooFinance = require('yahoo-finance2').default;
 
 const app = express();
 app.use(express.json());
@@ -532,6 +533,51 @@ app.post("/analyze", authenticateUser, async (req, res) => {
       }
     }
 
+    // Get real-time data from Yahoo Finance
+    let realtimePrice = null;
+    let marketCap = null;
+    let peRatio = null;
+    let earningsDate = null;
+    let lastEPS = null;
+    let analystRatings = null;
+    let fiftyTwoWeekHigh = null;
+    let fiftyTwoWeekLow = null;
+    let avgVolume = null;
+
+    try {
+      const quote = await yahooFinance.quote(ticker);
+      realtimePrice = quote.regularMarketPrice;
+      marketCap = quote.marketCap;
+      peRatio = quote.trailingPE;
+      fiftyTwoWeekHigh = quote.fiftyTwoWeekHigh;
+      fiftyTwoWeekLow = quote.fiftyTwoWeekLow;
+      avgVolume = quote.averageDailyVolume3Month;
+
+      // Get earnings calendar
+      if (quote.earningsTimestamp) {
+        earningsDate = new Date(quote.earningsTimestamp * 1000).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+      }
+
+      // Get analyst recommendations
+      try {
+        const analysis = await yahooFinance.quoteSummary(ticker, { modules: ['recommendationTrend'] });
+        if (analysis?.recommendationTrend?.trend?.[0]) {
+          const trend = analysis.recommendationTrend.trend[0];
+          analystRatings = {
+            strongBuy: trend.strongBuy || 0,
+            buy: trend.buy || 0,
+            hold: trend.hold || 0,
+            sell: trend.sell || 0,
+            strongSell: trend.strongSell || 0
+          };
+        }
+      } catch (e) {
+        console.error("Analyst ratings fetch error:", e.message);
+      }
+    } catch (e) {
+      console.error("Yahoo Finance fetch error:", e.message);
+    }
+
     let news = [];
     if (NEWS_KEY) {
       try {
@@ -824,6 +870,62 @@ RULES:
               ${companyDescription ? `
                 <div style="font-size:13px;line-height:1.6;color:#d0d0d0;">${companyDescription.length > 350 ? companyDescription.substring(0, 350) + '...' : companyDescription}</div>
               ` : '<div style="font-size:13px;line-height:1.6;color:#888;font-style:italic;">Company description not available</div>'}
+            </div>
+          </div>
+        ` : ''}
+
+        ${realtimePrice ? `
+          <div style="margin:16px;">
+            <div style="font-size:11px;color:#888;text-transform:uppercase;letter-spacing:1px;margin-bottom:12px;">💹 Live Market Data</div>
+            <div style="background:linear-gradient(135deg,rgba(15,15,15,0.95),rgba(25,25,35,0.95));border:1px solid rgba(249,115,22,0.3);border-radius:12px;padding:16px;">
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;">
+                <div>
+                  <div style="font-size:10px;color:#888;margin-bottom:4px;">Current Price</div>
+                  <div style="font-size:18px;font-weight:700;color:#fff;">$${realtimePrice.toFixed(2)}</div>
+                </div>
+                <div>
+                  <div style="font-size:10px;color:#888;margin-bottom:4px;">Market Cap</div>
+                  <div style="font-size:18px;font-weight:700;color:#fff;">${marketCap ? `$${(marketCap / 1e9).toFixed(2)}B` : 'N/A'}</div>
+                </div>
+                <div>
+                  <div style="font-size:10px;color:#888;margin-bottom:4px;">P/E Ratio</div>
+                  <div style="font-size:18px;font-weight:700;color:#fff;">${peRatio ? peRatio.toFixed(2) : 'N/A'}</div>
+                </div>
+                <div>
+                  <div style="font-size:10px;color:#888;margin-bottom:4px;">52W Range</div>
+                  <div style="font-size:12px;font-weight:600;color:#fff;">${fiftyTwoWeekLow ? `$${fiftyTwoWeekLow.toFixed(2)}` : 'N/A'} - ${fiftyTwoWeekHigh ? `$${fiftyTwoWeekHigh.toFixed(2)}` : 'N/A'}</div>
+                </div>
+              </div>
+              ${earningsDate ? `
+                <div style="padding:10px;background:rgba(102,126,234,0.1);border-radius:6px;margin-top:8px;">
+                  <span style="font-size:11px;color:#888;">Next Earnings: </span>
+                  <span style="font-size:12px;color:#667eea;font-weight:600;">${earningsDate}</span>
+                </div>
+              ` : ''}
+            </div>
+          </div>
+        ` : ''}
+
+        ${analystRatings ? `
+          <div style="margin:16px;">
+            <div style="font-size:11px;color:#888;text-transform:uppercase;letter-spacing:1px;margin-bottom:12px;">🎯 Wall Street Consensus</div>
+            <div style="background:linear-gradient(135deg,rgba(15,15,15,0.95),rgba(25,25,35,0.95));border:1px solid rgba(102,126,234,0.2);border-radius:12px;padding:16px;">
+              <div style="display:flex;gap:8px;margin-bottom:12px;">
+                ${analystRatings.strongBuy > 0 ? `<div style="flex:${analystRatings.strongBuy};background:rgba(16,185,129,0.8);height:24px;border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:10px;color:#fff;font-weight:600;">${analystRatings.strongBuy}</div>` : ''}
+                ${analystRatings.buy > 0 ? `<div style="flex:${analystRatings.buy};background:rgba(16,185,129,0.5);height:24px;border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:10px;color:#fff;font-weight:600;">${analystRatings.buy}</div>` : ''}
+                ${analystRatings.hold > 0 ? `<div style="flex:${analystRatings.hold};background:rgba(245,158,11,0.5);height:24px;border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:10px;color:#fff;font-weight:600;">${analystRatings.hold}</div>` : ''}
+                ${analystRatings.sell > 0 ? `<div style="flex:${analystRatings.sell};background:rgba(239,68,68,0.5);height:24px;border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:10px;color:#fff;font-weight:600;">${analystRatings.sell}</div>` : ''}
+                ${analystRatings.strongSell > 0 ? `<div style="flex:${analystRatings.strongSell};background:rgba(239,68,68,0.8);height:24px;border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:10px;color:#fff;font-weight:600;">${analystRatings.strongSell}</div>` : ''}
+              </div>
+              <div style="display:flex;justify-content:space-between;font-size:11px;color:#888;">
+                <span>🟢 ${analystRatings.strongBuy + analystRatings.buy} Buy</span>
+                <span>🟡 ${analystRatings.hold} Hold</span>
+                <span>🔴 ${analystRatings.sell + analystRatings.strongSell} Sell</span>
+              </div>
+              <div style="margin-top:10px;padding:8px;background:rgba(102,126,234,0.08);border-radius:6px;">
+                <div style="font-size:11px;color:#667eea;">🔍 Research Question:</div>
+                <div style="font-size:12px;color:#d0d0d0;margin-top:4px;">What's driving the analyst consensus? Check recent upgrades/downgrades.</div>
+              </div>
             </div>
           </div>
         ` : ''}
