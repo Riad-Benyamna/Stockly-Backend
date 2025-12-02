@@ -627,14 +627,19 @@ app.post("/analyze", authenticateUser, async (req, res) => {
         }
       }
 
-      // Calculate insider flow
-      const recentBuys = transactions.filter(t => t.type === 'BUY').length;
-      const recentSells = transactions.filter(t => t.type === 'SELL').length;
+      // Calculate insider flow (only count BUY/SELL, not OTHER)
+      const buyTransactions = transactions.filter(t => t.type === 'BUY');
+      const sellTransactions = transactions.filter(t => t.type === 'SELL');
+      const recentBuys = buyTransactions.length;
+      const recentSells = sellTransactions.length;
       const netFlow = recentBuys - recentSells;
 
-      if (transactions.length > 0) {
+      // Only show if we have actual BUY/SELL transactions (not just "OTHER")
+      const relevantTransactions = transactions.filter(t => t.type === 'BUY' || t.type === 'SELL');
+
+      if (relevantTransactions.length > 0) {
         insiderData = {
-          transactions: transactions.slice(0, 5), // Show top 5 most recent
+          transactions: relevantTransactions.slice(0, 5), // Show top 5 BUY/SELL only
           totalBuys: recentBuys,
           totalSells: recentSells,
           netFlow,
@@ -739,8 +744,10 @@ app.post("/analyze", authenticateUser, async (req, res) => {
 COMPANY INFO:
 ${companyDescription ? `- Business: ${companyDescription.substring(0, 200)}...` : '- Company operates in the financial markets'}
 ${companySector ? `- Sector: ${companySector}` : ''}
+${realtimePrice ? `- Current Price: $${realtimePrice.toFixed(2)}` : ''}
+${marketCap ? `- Market Cap: $${(marketCap / 1e9).toFixed(2)}B` : ''}
 
-${news.length ? `RECENT NEWS:\n${news.map(n => `• ${n.source}: ${n.title}`).join('\n')}` : 'RECENT NEWS:\n• Limited news coverage'}
+${news.length ? `RECENT NEWS (LAST 3 DAYS):\n${news.map(n => `• ${n.source}: ${n.title}`).join('\n')}` : 'RECENT NEWS:\n• Limited news coverage'}
 
 Write a 3-section analysis (100 words total). Use EXACT numbered format:
 
@@ -748,14 +755,17 @@ Write a 3-section analysis (100 words total). Use EXACT numbered format:
 One clear sentence explaining ${ticker}'s business. Example: "Apple makes iPhones and computers."
 
 2. GOOD SIGNS
-List 2-3 positive facts about ${ticker} from news or business. Use bullets (•). Keep it simple - what's going well?
+List 2-3 positive facts about ${ticker} from RECENT news or current business situation. Use bullets (•). Keep it simple - what's going well RIGHT NOW?
 
 3. WARNING SIGNS
 List 2-3 concerns or risks about ${ticker}. Use bullets (•). What should someone watch out for?
 
-RULES:
+CRITICAL RULES:
 - Write for a beginner - very simple language
 - NO jargon or technical terms
+- NEVER mention specific years or old revenue numbers
+- Only use RECENT information (last 3 days of news)
+- If no recent news, mention general industry trends
 - Use plain text, NO markdown
 - Start each section with "1.", "2.", "3."`;
 
@@ -766,23 +776,28 @@ COMPANY INFO:
 ${companyDescription ? `- Business: ${companyDescription.substring(0, 200)}...` : '- Company operates in the financial markets'}
 ${companySector ? `- Sector: ${companySector}` : ''}
 ${companyIndustry ? `- Industry: ${companyIndustry}` : ''}
+${realtimePrice ? `- Current Price: $${realtimePrice.toFixed(2)}` : ''}
+${marketCap ? `- Market Cap: $${(marketCap / 1e9).toFixed(2)}B` : ''}
+${peRatio ? `- P/E Ratio: ${peRatio.toFixed(2)}` : ''}
 
-${news.length ? `RECENT FINANCIAL NEWS:\n${news.map(n => `• ${n.source} (${n.time}h ago): ${n.title}`).join('\n')}` : 'RECENT FINANCIAL NEWS:\n• Limited news coverage in past 72 hours'}
+${news.length ? `RECENT FINANCIAL NEWS (LAST 72 HOURS):\n${news.map(n => `• ${n.source} (${n.time}h ago): ${n.title}`).join('\n')}` : 'RECENT FINANCIAL NEWS:\n• Limited news coverage in past 72 hours'}
 
 Write a focused 3-section analysis (120 words). Use EXACT numbered format:
 
 1. BUSINESS MODEL
-In 2-3 sentences, explain ${ticker}'s business model. What do they sell/provide? Who are their customers? What's their competitive position?
+In 2-3 sentences, explain ${ticker}'s current business model. What do they sell/provide? Who are their customers? What's their competitive position?
 
 2. KEY RESEARCH QUESTIONS
-List 3-4 specific questions an investor should answer about ${ticker} before investing. Use bullet points (•). Focus on: revenue sources, competitive position, growth drivers, and recent developments.
+List 3-4 specific questions an investor should answer about ${ticker} before investing. Use bullet points (•). Focus on: revenue sources, competitive position, growth drivers, and RECENT developments.
 
 3. RISK FACTORS
-List 2-3 specific risks or concerns to verify about ${ticker}. Use bullet points (•). Be specific to this company's situation.
+List 2-3 specific risks or concerns to verify about ${ticker}. Use bullet points (•). Be specific to this company's current situation.
 
-RULES:
+CRITICAL RULES:
 - Be SPECIFIC to ${ticker} and their actual business
-- Use technical/professional language
+- Use technical/professional language but stay current
+- NEVER cite specific years or historical revenue numbers
+- Only reference RECENT trends and developments
 - Use plain text, NO markdown
 - Third-person only
 - Start each section with "1.", "2.", "3."`;
