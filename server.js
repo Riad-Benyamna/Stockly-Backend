@@ -538,11 +538,21 @@ app.post("/analyze", authenticateUser, async (req, res) => {
     let marketCap = null;
     let peRatio = null;
     let earningsDate = null;
+    let earningsTimestamp = null;
     let lastEPS = null;
     let analystRatings = null;
+    let analystPriceTargets = null;
     let fiftyTwoWeekHigh = null;
     let fiftyTwoWeekLow = null;
     let avgVolume = null;
+    let beta = null;
+    let dividendYield = null;
+    let dividendRate = null;
+    let exDividendDate = null;
+    let payoutRatio = null;
+    let shortPercentOfFloat = null;
+    let priceChange24h = null;
+    let priceChangePercent24h = null;
 
     try {
       const quote = await yahooFinance.quote(ticker);
@@ -552,15 +562,30 @@ app.post("/analyze", authenticateUser, async (req, res) => {
       fiftyTwoWeekHigh = quote.fiftyTwoWeekHigh;
       fiftyTwoWeekLow = quote.fiftyTwoWeekLow;
       avgVolume = quote.averageDailyVolume3Month;
+      beta = quote.beta;
+      dividendYield = quote.dividendYield;
+      dividendRate = quote.dividendRate;
+      exDividendDate = quote.exDividendDate;
+      payoutRatio = quote.payoutRatio;
+      shortPercentOfFloat = quote.shortPercentOfFloat;
 
-      // Get earnings calendar
+      // Calculate 24h price change
+      if (quote.regularMarketPrice && quote.regularMarketPreviousClose) {
+        priceChange24h = quote.regularMarketPrice - quote.regularMarketPreviousClose;
+        priceChangePercent24h = ((priceChange24h / quote.regularMarketPreviousClose) * 100);
+      }
+
+      // Get earnings calendar with timestamp for countdown
       if (quote.earningsTimestamp) {
+        earningsTimestamp = quote.earningsTimestamp;
         earningsDate = new Date(quote.earningsTimestamp * 1000).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
       }
 
-      // Get analyst recommendations
+      // Get analyst recommendations and price targets
       try {
-        const analysis = await yahooFinance.quoteSummary(ticker, { modules: ['recommendationTrend'] });
+        const analysis = await yahooFinance.quoteSummary(ticker, { modules: ['recommendationTrend', 'financialData'] });
+
+        // Analyst ratings
         if (analysis?.recommendationTrend?.trend?.[0]) {
           const trend = analysis.recommendationTrend.trend[0];
           analystRatings = {
@@ -571,8 +596,20 @@ app.post("/analyze", authenticateUser, async (req, res) => {
             strongSell: trend.strongSell || 0
           };
         }
+
+        // Price targets
+        if (analysis?.financialData) {
+          const fd = analysis.financialData;
+          analystPriceTargets = {
+            current: fd.currentPrice || realtimePrice,
+            targetMean: fd.targetMeanPrice,
+            targetHigh: fd.targetHighPrice,
+            targetLow: fd.targetLowPrice,
+            numberOfAnalysts: fd.numberOfAnalystOpinions
+          };
+        }
       } catch (e) {
-        console.error("Analyst ratings fetch error:", e.message);
+        console.error("Analyst data fetch error:", e.message);
       }
     } catch (e) {
       console.error("Yahoo Finance fetch error:", e.message);
@@ -1054,6 +1091,38 @@ CRITICAL RULES:
                 <span>🟡 ${analystRatings.hold} Hold</span>
                 <span>🔴 ${analystRatings.sell + analystRatings.strongSell} Sell</span>
               </div>
+              ${analystPriceTargets && analystPriceTargets.targetMean ? `
+                <div style="margin-top:12px;padding:12px;background:rgba(16,185,129,0.08);border-radius:6px;">
+                  <div style="font-size:11px;color:#888;margin-bottom:8px;">📍 Price Targets</div>
+                  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:8px;">
+                    <div style="text-align:center;">
+                      <div style="font-size:9px;color:#888;">LOW</div>
+                      <div style="font-size:14px;font-weight:600;color:#ef4444;">$${analystPriceTargets.targetLow?.toFixed(2) || 'N/A'}</div>
+                    </div>
+                    <div style="text-align:center;">
+                      <div style="font-size:9px;color:#888;">AVERAGE</div>
+                      <div style="font-size:16px;font-weight:700;color:#10b981;">$${analystPriceTargets.targetMean.toFixed(2)}</div>
+                    </div>
+                    <div style="text-align:center;">
+                      <div style="font-size:9px;color:#888;">HIGH</div>
+                      <div style="font-size:14px;font-weight:600;color:#10b981;">$${analystPriceTargets.targetHigh?.toFixed(2) || 'N/A'}</div>
+                    </div>
+                  </div>
+                  ${realtimePrice && analystPriceTargets.targetMean ? `
+                    <div style="padding:8px;background:rgba(${(((analystPriceTargets.targetMean - realtimePrice) / realtimePrice) * 100) > 0 ? '16,185,129' : '239,68,68'},0.1);border-radius:4px;text-align:center;">
+                      <span style="font-size:11px;color:#888;">Potential: </span>
+                      <span style="font-size:13px;font-weight:700;color:${(((analystPriceTargets.targetMean - realtimePrice) / realtimePrice) * 100) > 0 ? '#10b981' : '#ef4444'};">
+                        ${(((analystPriceTargets.targetMean - realtimePrice) / realtimePrice) * 100) > 0 ? '+' : ''}${(((analystPriceTargets.targetMean - realtimePrice) / realtimePrice) * 100).toFixed(1)}%
+                      </span>
+                      ${Math.abs(((analystPriceTargets.targetMean - realtimePrice) / realtimePrice) * 100) > 20 ?
+                        `<span style="font-size:10px;color:#888;margin-left:6px;">(${Math.abs(((analystPriceTargets.targetMean - realtimePrice) / realtimePrice) * 100) > 0 ? 'Undervalued' : 'Overvalued'})</span>` : ''}
+                    </div>
+                  ` : ''}
+                  ${analystPriceTargets.numberOfAnalysts ? `
+                    <div style="font-size:10px;color:#666;text-align:center;margin-top:4px;">Based on ${analystPriceTargets.numberOfAnalysts} analyst${analystPriceTargets.numberOfAnalysts > 1 ? 's' : ''}</div>
+                  ` : ''}
+                </div>
+              ` : ''}
               <div style="margin-top:10px;padding:8px;background:rgba(102,126,234,0.08);border-radius:6px;">
                 <div style="font-size:11px;color:#667eea;">🔍 Research Question:</div>
                 <div style="font-size:12px;color:#d0d0d0;margin-top:4px;">What's driving the analyst consensus? Check recent upgrades/downgrades.</div>
@@ -1105,15 +1174,198 @@ CRITICAL RULES:
                   <div style="font-size:9px;color:#666;margin-top:2px;">Historical Range</div>
                 </div>
               </div>
-              ${earningsDate ? `
-                <div style="padding:10px;background:rgba(102,126,234,0.1);border-radius:6px;margin-top:8px;">
-                  <span style="font-size:11px;color:#888;">📅 Next Earnings: </span>
-                  <span style="font-size:12px;color:#667eea;font-weight:600;">${earningsDate}</span>
-                </div>
+              ${earningsDate && earningsTimestamp ? `
+                ${(() => {
+                  const daysUntilEarnings = Math.floor((earningsTimestamp * 1000 - Date.now()) / (1000 * 60 * 60 * 24));
+                  const isUpcoming = daysUntilEarnings >= 0 && daysUntilEarnings <= 30;
+                  return `
+                    <div style="padding:12px;background:${isUpcoming ? 'linear-gradient(135deg,rgba(251,191,36,0.15),rgba(245,158,11,0.15))' : 'rgba(102,126,234,0.1)'};border:1px solid ${isUpcoming ? 'rgba(251,191,36,0.4)' : 'rgba(102,126,234,0.2)'};border-radius:8px;margin-top:8px;">
+                      <div style="display:flex;justify-content:space-between;align-items:center;">
+                        <div>
+                          <div style="font-size:10px;color:#888;margin-bottom:2px;">📅 Next Earnings</div>
+                          <div style="font-size:13px;color:#fff;font-weight:600;">${earningsDate}</div>
+                        </div>
+                        ${isUpcoming ? `
+                          <div style="text-align:right;">
+                            <div style="font-size:20px;font-weight:700;color:#fbbf24;">${daysUntilEarnings}</div>
+                            <div style="font-size:9px;color:#f59e0b;text-transform:uppercase;">day${daysUntilEarnings !== 1 ? 's' : ''} away</div>
+                          </div>
+                        ` : ''}
+                      </div>
+                      ${isUpcoming && daysUntilEarnings <= 7 ? `
+                        <div style="margin-top:8px;padding:6px;background:rgba(239,68,68,0.15);border-radius:4px;text-align:center;">
+                          <span style="font-size:10px;color:#fbbf24;font-weight:600;">⚠️ Earnings coming soon - expect volatility</span>
+                        </div>
+                      ` : ''}
+                    </div>
+                  `;
+                })()}
               ` : ''}
               <div style="padding:8px;background:rgba(249,115,22,0.08);border-radius:6px;margin-top:8px;">
                 <div style="font-size:11px;color:#f97316;">💡 Educational Note:</div>
                 <div style="font-size:12px;color:#d0d0d0;margin-top:4px;">High volume = easier to buy/sell. Low P/E might mean undervalued or slow growth. Always compare with industry peers.</div>
+              </div>
+            </div>
+          </div>
+        ` : ''}
+
+        ${realtimePrice && beta ? `
+          ${(() => {
+            // Calculate Risk Score (1-10)
+            let riskScore = 5; // Default medium risk
+            let riskLevel = 'Moderate';
+            let riskColor = '#f59e0b';
+            let riskEmoji = '🟡';
+
+            // Factors: beta, market cap, short interest, volatility
+            if (beta !== null && beta !== undefined) {
+              if (beta < 0.8) riskScore -= 2;
+              else if (beta > 1.5) riskScore += 2;
+              else if (beta > 1.2) riskScore += 1;
+            }
+
+            if (marketCap) {
+              if (marketCap > 200e9) riskScore -= 1; // Large cap = safer
+              else if (marketCap < 2e9) riskScore += 2; // Small cap = risky
+            }
+
+            if (shortPercentOfFloat) {
+              if (shortPercentOfFloat > 0.2) riskScore += 2; // High short interest
+              else if (shortPercentOfFloat > 0.15) riskScore += 1;
+            }
+
+            // Clamp to 1-10
+            riskScore = Math.max(1, Math.min(10, riskScore));
+
+            // Determine level
+            if (riskScore <= 3) {
+              riskLevel = 'Low Risk';
+              riskColor = '#10b981';
+              riskEmoji = '🟢';
+            } else if (riskScore >= 7) {
+              riskLevel = 'High Risk';
+              riskColor = '#ef4444';
+              riskEmoji = '🔴';
+            }
+
+            return `
+              <div style="margin:16px;">
+                <div style="font-size:11px;color:#888;text-transform:uppercase;letter-spacing:1px;margin-bottom:12px;">🎯 Beginner Risk Score</div>
+                <div style="background:linear-gradient(135deg,rgba(15,15,15,0.95),rgba(25,25,35,0.95));border:1px solid rgba(${riskScore <= 3 ? '16,185,129' : riskScore >= 7 ? '239,68,68' : '245,158,11'},0.3);border-radius:12px;padding:16px;">
+                  <div style="display:flex;align-items:center;gap:16px;margin-bottom:12px;">
+                    <div style="font-size:48px;font-weight:700;color:${riskColor};">${riskScore}</div>
+                    <div style="flex:1;">
+                      <div style="font-size:16px;font-weight:600;color:${riskColor};margin-bottom:4px;">${riskEmoji} ${riskLevel}</div>
+                      <div style="font-size:11px;color:#888;">Out of 10</div>
+                    </div>
+                  </div>
+                  <div style="background:rgba(0,0,0,0.3);height:8px;border-radius:4px;overflow:hidden;margin-bottom:12px;">
+                    <div style="width:${riskScore * 10}%;height:100%;background:linear-gradient(90deg,${riskColor},${riskColor});transition:width 0.3s;"></div>
+                  </div>
+                  <div style="font-size:11px;color:#d0d0d0;line-height:1.5;margin-bottom:8px;">
+                    ${riskScore <= 3 ? '✓ Good for beginners - Stable, large company with predictable movements.' : riskScore >= 7 ? '⚠️ For experienced traders - High volatility, unpredictable price swings.' : '⚡ Moderate volatility - Some price swings expected, suitable for intermediate investors.'}
+                  </div>
+                  <div style="display:grid;gap:6px;font-size:10px;">
+                    ${beta ? `<div style="padding:6px;background:rgba(0,0,0,0.2);border-radius:4px;color:#c0c0c0;display:flex;justify-content:space-between;"><span>Beta (Volatility):</span><span style="color:#fff;font-weight:600;">${beta.toFixed(2)}</span></div>` : ''}
+                    ${marketCap ? `<div style="padding:6px;background:rgba(0,0,0,0.2);border-radius:4px;color:#c0c0c0;display:flex;justify-content:space-between;"><span>Company Size:</span><span style="color:#fff;font-weight:600;">${marketCap > 200e9 ? 'Large Cap' : marketCap > 10e9 ? 'Mid Cap' : 'Small Cap'}</span></div>` : ''}
+                  </div>
+                </div>
+              </div>
+            `;
+          })()}
+        ` : ''}
+
+        ${priceChangePercent24h && Math.abs(priceChangePercent24h) >= 3 ? `
+          ${(() => {
+            // "Why Is It Moving?" section for significant price changes
+            return `
+              <div style="margin:16px;">
+                <div style="font-size:11px;color:#888;text-transform:uppercase;letter-spacing:1px;margin-bottom:12px;">📈 Why Is It Moving?</div>
+                <div style="background:linear-gradient(135deg,rgba(15,15,15,0.95),rgba(25,25,35,0.95));border:1px solid rgba(${priceChangePercent24h > 0 ? '16,185,129' : '239,68,68'},0.3);border-radius:12px;padding:16px;">
+                  <div style="text-align:center;margin-bottom:12px;">
+                    <div style="font-size:32px;font-weight:700;color:${priceChangePercent24h > 0 ? '#10b981' : '#ef4444'};">
+                      ${priceChangePercent24h > 0 ? '+' : ''}${priceChangePercent24h.toFixed(2)}%
+                    </div>
+                    <div style="font-size:11px;color:#888;">24-Hour Change</div>
+                  </div>
+                  <div style="padding:12px;background:rgba(${priceChangePercent24h > 0 ? '16,185,129' : '239,68,68'},0.1);border-radius:6px;margin-bottom:8px;">
+                    <div style="font-size:12px;color:#d0d0d0;line-height:1.5;">
+                      ${ticker} is ${priceChangePercent24h > 0 ? 'UP' : 'DOWN'} ${Math.abs(priceChangePercent24h).toFixed(1)}% today. Check the news section below for recent headlines that might explain this movement.
+                    </div>
+                  </div>
+                  ${Math.abs(priceChangePercent24h) >= 5 ? `
+                    <div style="padding:8px;background:rgba(251,191,36,0.1);border-radius:6px;text-align:center;">
+                      <span style="font-size:10px;color:#fbbf24;font-weight:600;">⚡ Significant Movement - Research before acting</span>
+                    </div>
+                  ` : ''}
+                </div>
+              </div>
+            `;
+          })()}
+        ` : ''}
+
+        ${dividendYield || dividendRate ? `
+          <div style="margin:16px;">
+            <div style="font-size:11px;color:#888;text-transform:uppercase;letter-spacing:1px;margin-bottom:12px;">💰 Dividend Dashboard</div>
+            <div style="background:linear-gradient(135deg,rgba(15,15,15,0.95),rgba(25,25,35,0.95));border:1px solid rgba(34,197,94,0.3);border-radius:12px;padding:16px;">
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;">
+                ${dividendYield ? `
+                  <div style="text-align:center;padding:10px;background:rgba(34,197,94,0.1);border-radius:6px;">
+                    <div style="font-size:10px;color:#888;margin-bottom:4px;">Dividend Yield</div>
+                    <div style="font-size:22px;font-weight:700;color:#22c55e;">${(dividendYield * 100).toFixed(2)}%</div>
+                  </div>
+                ` : ''}
+                ${dividendRate ? `
+                  <div style="text-align:center;padding:10px;background:rgba(34,197,94,0.1);border-radius:6px;">
+                    <div style="font-size:10px;color:#888;margin-bottom:4px;">Annual Payout</div>
+                    <div style="font-size:18px;font-weight:700;color:#22c55e;">$${dividendRate.toFixed(2)}</div>
+                    <div style="font-size:9px;color:#666;margin-top:2px;">per share</div>
+                  </div>
+                ` : ''}
+              </div>
+              ${exDividendDate ? `
+                <div style="padding:10px;background:rgba(102,126,234,0.1);border-radius:6px;margin-bottom:8px;">
+                  <div style="font-size:11px;color:#888;margin-bottom:2px;">📅 Ex-Dividend Date</div>
+                  <div style="font-size:12px;color:#667eea;font-weight:600;">${new Date(exDividendDate * 1000).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</div>
+                </div>
+              ` : ''}
+              ${payoutRatio ? `
+                <div style="padding:8px;background:rgba(${payoutRatio < 0.6 ? '16,185,129' : payoutRatio > 0.8 ? '239,68,68' : '245,158,11'},0.1);border-radius:6px;">
+                  <div style="font-size:10px;color:#888;">Payout Ratio: <span style="color:#fff;font-weight:600;">${(payoutRatio * 100).toFixed(1)}%</span></div>
+                  <div style="font-size:9px;color:#${payoutRatio < 0.6 ? '10b981' : payoutRatio > 0.8 ? 'ef4444' : 'f59e0b'};margin-top:2px;">
+                    ${payoutRatio < 0.6 ? '✓ Sustainable - Room to grow dividends' : payoutRatio > 0.8 ? '⚠️ High - Dividend may be at risk' : '⚡ Moderate - Watch for changes'}
+                  </div>
+                </div>
+              ` : ''}
+              <div style="padding:8px;background:rgba(34,197,94,0.08);border-radius:6px;margin-top:8px;">
+                <div style="font-size:11px;color:#22c55e;">💡 Passive Income Potential:</div>
+                <div style="font-size:12px;color:#d0d0d0;margin-top:4px;">Dividend stocks pay you regularly. Good for long-term investors seeking steady income.</div>
+              </div>
+            </div>
+          </div>
+        ` : ''}
+
+        ${shortPercentOfFloat ? `
+          <div style="margin:16px;">
+            <div style="font-size:11px;color:#888;text-transform:uppercase;letter-spacing:1px;margin-bottom:12px;">⚡ Short Interest</div>
+            <div style="background:linear-gradient(135deg,rgba(15,15,15,0.95),rgba(25,25,35,0.95));border:1px solid rgba(${shortPercentOfFloat > 0.2 ? '239,68,68' : '102,126,234'},0.3);border-radius:12px;padding:16px;">
+              <div style="text-align:center;margin-bottom:12px;">
+                <div style="font-size:32px;font-weight:700;color:${shortPercentOfFloat > 0.2 ? '#ef4444' : shortPercentOfFloat > 0.1 ? '#f59e0b' : '#10b981'};">
+                  ${(shortPercentOfFloat * 100).toFixed(1)}%
+                </div>
+                <div style="font-size:11px;color:#888;">of Float Shorted</div>
+              </div>
+              <div style="background:rgba(0,0,0,0.3);height:8px;border-radius:4px;overflow:hidden;margin-bottom:12px;">
+                <div style="width:${Math.min(shortPercentOfFloat * 100, 100)}%;height:100%;background:linear-gradient(90deg,${shortPercentOfFloat > 0.2 ? '#ef4444' : '#667eea'},${shortPercentOfFloat > 0.2 ? '#dc2626' : '#764ba2'});"></div>
+              </div>
+              <div style="padding:10px;background:rgba(${shortPercentOfFloat > 0.2 ? '239,68,68' : '102,126,234'},0.1);border-radius:6px;margin-bottom:8px;">
+                <div style="font-size:12px;color:#d0d0d0;line-height:1.5;">
+                  ${shortPercentOfFloat > 0.2 ? '🔥 High short interest! This stock could experience significant volatility. "Short squeeze" potential if price rises.' : shortPercentOfFloat > 0.1 ? '⚡ Moderate short interest. Some traders betting against this stock.' : '✓ Low short interest. Relatively stable from short seller pressure.'}
+                </div>
+              </div>
+              <div style="padding:8px;background:rgba(139,92,246,0.08);border-radius:6px;">
+                <div style="font-size:11px;color:#8b5cf6;">🔍 Research Note:</div>
+                <div style="font-size:12px;color:#d0d0d0;margin-top:4px;">High short interest (>20%) can mean big price swings. Experienced traders only.</div>
               </div>
             </div>
           </div>
